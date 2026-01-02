@@ -1,0 +1,175 @@
+﻿Name,Rarity,Value,S,P,E,C,I,A,L,Sex
+Vault suit,N/A,,,,,,,,,
+Armored vault suit,Common,10,,3,,,,,,
+Sturdy vault suit,Rare,100,,5,,,,,,
+Heavy vault suit,Legendary,500,,7,,,,,,
+Battle armor,Common,10,2,,1,,,,,
+Sturdy battle armor,Rare,100,3,,2,,,,,
+Heavy battle armor,Legendary,500,4,,3,,,,,
+Combat armor,Common,10,2,,,,,1,,
+Sturdy combat armor,Rare,100,3,,,,,2,,
+Heavy combat armor,Legendary,500,4,,,,,3,,
+Formal wear,Common,10,,,,,,,3,
+Fancy formal wear,Rare,100,,,,,,,5,
+Lucky formal wear,Legendary,500,,,,,,,7,
+Handyman jumpsuit,Common,10,,,,,,3,,
+Advanced jumpsuit,Rare,100,,,,,,5,,
+Expert jumpsuit,Legendary,500,,,,,,7,,
+Lab coat,Common,10,,,,,3,,,
+Advanced lab coat,Rare,100,,,,,5,,,
+Expert lab coat,Legendary,500,,,,,7,,,
+Leather armor,Common,10,1,,2,,,,,
+Sturdy leather armor,Rare,100,2,,3,,,,,
+Heavy leather armor,Legendary,500,3,,4,,,,,
+Merc gear,Common,10,,1,,,,1,1,
+Sturdy merc gear,Rare,100,,1,,,,2,2,
+Heavy merc gear,Legendary,500,,2,,,,3,2,
+Military fatigues,Common,10,3,,,,,,,
+Officer fatigues,Rare,100,5,,,,,,,
+Commander fatigues,Legendary,500,7,,,,,,,
+Nightwear,Common,10,,,,3,,,,
+Naughty nightwear,Rare,100,,,,5,,,,
+Lucky nightwear,Legendary,500,,,,7,,,,
+Junior officer uniform,Common,10,,,,1,2,,,
+Officer uniform,Rare,100,,,,2,3,,,
+Commander uniform,Legendary,500,,,,3,4,,,
+Radiation suit,Common,10,,1,2,,,,,
+Advanced radiation suit,Rare,100,,2,3,,,,,
+Expert radiation suit,Legendary,500,,3,4,,,,,
+Raider armor,Common,10,,1,,,,2,,
+Sturdy raider armor,Rare,100,,2,,,,3,,
+Heavy raider armor,Legendary,500,,3,,,,4,,
+Initiate robe,Common,10,,,,2,,1,,
+Scribe robe,Rare,100,,,,3,,2,,
+Wasteland gear,Common,10,,,3,,,,,
+Sturdy wasteland gear,Rare,100,,,5,,,,,
+Heavy wasteland gear,Legendary,500,,,7,,,,,
+Wasteland medic,Common,10,,2,,,,,1,
+Wasteland doctor,Rare,100,,3,,,,,2,
+Wasteland surgeon,Legendary,500,,4,,,,,3,
+Treasure hunter gear,Common,10,2,1,,,,,,
+Bounty hunter gear,Rare,100,3,2,,,,,,
+Mutant hunter gear,Legendary,500,4,3,,,,,,
+Flight suit,Common,10,,,1,,,2,,
+Advanced flight suit,Rare,100,,,2,,,3,,
+Expert flight suit,Legendary,500,,,3,,,4,,
+BoS uniform,Common,10,,2,,1,,,,
+Advanced BoS uniform,Rare,100,,3,,2,,,,
+Expert BoS uniform,Legendary,500,,4,,3,,,,
+Sturdy metal armor,Rare,100,3,,,,,,2,
+Heavy metal armor,Legendary,500,4,,,,,,3,
+Advanced Institute jumper,Rare,100,,,,,3,2,,
+Expert Institute jumper,Legendary,500,,,,,4,3,,
+Mechanic jumpsuit,Common,10,1,,,1,,,,M
+RobCo factory uniform,Common,10,,,2,,,,2,
+Polka dot sundress,Common,10,1,,,,1,,,F
+Pre-War suburbanite,Common,10,,1,,,1,,,M
+Rural schoolmarm,Common,10,,1,1,,,,,F
+Spring casualwear,Common,10,,,1,,,1,,M
+Vault socialite,Common,10,,,,1,,1,,F
+Accountant outfit,Common,10,,4,,,,,,M
+Agent provocateur,Common,10,,,,,4,,,F
+Bespoke attire,Common,10,,,4,,,,,M
+Business suit,Common,10,,,,4,,,,M
+Country girl,Common,10,4,,,,,,,F
+Waitress uniform,Common,10,,,,,,4,,F
+BOS casual,Rare,100,,,2,,,2,,
+NCR Ranger outfit,Rare,100,,4,,2,,,,
+RobCo R&D suit,Rare,100,,,2,,4,,,
+Robot armor,Rare,100,2,,2,,,,2,
+Bowling shirt,Rare,100,,6,,,,,,M
+Clergy outfit,Rare,100,,,,4,,,1,M
+Swing dress,Rare,100,,,,,,6,,F
+Comedian outfit,Rare,100,,2,,2,,,1,M
+Doo-wop singer,Rare,100,1,,,1,,1,1,F
+Drag racer,Rare,100,1,,1,,,1,1,M
+Post-War Casanova,Rare,100,,1,,1,1,,1,M
+Soda fountain dress,Rare,100,,1,1,,1,,1,F
+Elf outfit,Rare,100,,,,,3,,2,
+Enclave security outfit,Rare,100,2,,2,,,,,
+Engineer outfit,Rare,100,,,2,,2,,1,F
+Ghost costume,Rare,100,,,2,,,3,,
+Greaser outfit,Rare,100,,,,2,,2,1,M
+Horror fan outfit,Rare,100,,,4,,,,1,M
+Knight armor,Rare,100,2,2,,,,,1,M
+Librarian outfit,Rare,100,,,,,4,,1,F
+Mayor outfit,Rare,100,,,,2,2,,1,M
+Medieval ruler outfit,Rare,100,,2,,2,,,1,M
+Motorcycle jacket,Rare,100,6,,,,,,,
+Movie fan outfit,Rare,100,,4,,,,,1,F
+Ninja outfit,Rare,100,,,,,,4,1,M
+Nobility outfit,Rare,100,,,2,,2,,1,M
+Pilgrim outfit,Rare,100,,,,3,2,,,
+Professor outfit,Rare,100,,,,,4,,1,M
+Republic robes,Rare,100,,,,4,,,1,F
+Santa suit,Rare,100,,3,,2,,,,
+Sci-fi fan outfit,Rare,100,,,,,2,2,1,M
+Skeleton costume,Rare,100,2,,,,,,3,
+Soldier uniform,Rare,100,2,,2,,,,1,F
+Sports fan outfit,Rare,100,4,,,,,,1,M
+Surgeon outfit,Rare,100,,2,,,,2,1,F
+Survivor armor,Rare,100,2,,,,,2,1,M
+Wrestler outfit,Rare,100,2,,2,,,,1,M
+Baseball uniform,Rare,100,,,,,,4,1,
+Lifeguard outfit,Rare,100,,4,,,,,1,
+Swimsuit,Rare,100,,,2,2,,,1,
+Vault 33 suit,Rare,100,,3,,,,,2,
+Ma June jacket,Rare,100,,2,,,,,2,
+Sleazy suit,Rare,100,,,,2,2,,,
+Prewar cowboy costume,Rare,100,,,,2,,2,,
+Wedding dress,Rare,100,,,,2,,,2,
+Action wedding dress,Rare,100,,,,,,2,2,
+Vault security outfit,Rare,100,,,2,,,,2,
+Abraham's relaxedwear,Legendary,500,,,1,,2,2,2,M
+Tattered longcoat,Legendary,500,2,,2,2,,,2,M
+Autumn's uniform,Legendary,500,2,2,2,1,,,,M
+Bittercup's outfit,Legendary,500,2,2,2,1,,,,F
+Confessor Cromwell's rags,Legendary,500,,2,2,,1,,2,M
+Elder robe,Legendary,500,,,,4,,3,,
+Eulogy Jones' suit,Legendary,500,,2,,2,1,,2,M
+Heavy synth armor,Legendary,500,,,4,,3,,,
+Incognito leisurewear,Legendary,500,,,,2,2,2,2,
+Lucy's vault suit,Legendary,500,,3,2,,,,3,
+Moldaver's armor,Legendary,500,2,2,4,,,,4,
+Minuteman uniform,Legendary,500,2,2,,,2,2,,M
+Piper's outfit,Legendary,500,,2,2,,,2,2,F
+Scribe Rothchild's robe,Legendary,500,,2,1,2,2,,,M
+Sheriff's duster,Legendary,500,,2,5,,,,,M
+Sleek suit,Legendary,500,,,,2,2,4,4,
+Tenpenny's suit,Legendary,500,,2,,2,2,,1,M
+Three Dog's outfit,Legendary,500,,2,,5,,,,M
+Tunnel Snakes' outfit,Legendary,500,,2,1,2,,2,,M
+Rackie Jobinson's Jersey,Legendary,500,4,4,,4,,4,,
+Detective outfit,Legendary,500,,4,4,,4,,4,M
+Original Santa suit,Legendary,500,,4,3,4,,,,
+Death's jacket,Legendary,500,,4,4,,,4,4,
+Famine's vestment,Legendary,500,4,,4,,4,,4,
+Pestilence's plating,Legendary,500,,,4,4,4,4,,
+Alien space suit,Legendary,500,,2,,,4,2,,
+Alien space suit (variant),Legendary,500,,,1,,2,2,2,
+The Ghoul's coat,Legendary,500,,,2,2,2,,2,
+Wilzig's travelwear,Legendary,500,,4,2,,,2,4,
+T-45a power armor,Legendary,500,2,3,,,,,,
+T-45d power armor,Legendary,500,2,4,,,,,,
+T-45f power armor,Legendary,500,2,5,,,,,,
+T-51a power armor,Legendary,500,3,1,,,,,,
+T-51d power armor,Legendary,500,3,2,,,,,,
+T-51f power armor,Legendary,500,4,3,,,,,,
+T-60a power armor,Legendary,500,2,,3,,,,,
+T-60d power armor,Legendary,500,2,,4,,,,,
+T-60f power armor,Legendary,500,1,1,5,,,,,
+War's armor,Legendary,500,4,4,4,4,,,,
+Scarred power armor,Legendary,500,4,2,4,2,,,,
+X-01 Mk I power armor,Legendary,500,3,1,1,,,,,
+X-01 Mk IV power armor,Legendary,500,4,1,1,,,,,
+X-01 Mk VI power armor,Legendary,500,5,1,1,,,,,
+Cross' power armor,Common,500,5,2,2,,,,,F
+Lyon's Pride armor,Common,500,4,3,,,,,1,F
+Jericho's leather armor,Common,500,2,,6,,,,,M
+Elder Lyon's robe,Common,500,,2,1,6,2,,,M
+Harkness' security uniform,Common,500,,5,,,,3,2,M
+Moira's RobCo jumpsuit,Common,500,,3,1,,2,,,F
+Mr. Burke's businesswear,Common,500,,,,4,,,4,M
+Amata's jumpsuit,Common,500,,,,2,2,,2,F
+Dad's lab uniform,Common,500,,,,,5,,2,M
+Doctor Li's outfit,Common,500,,,,,3,,2,F
