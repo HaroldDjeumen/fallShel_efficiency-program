@@ -11,10 +11,15 @@ edge_options.add_argument("--disable-gpu")
 driver = webdriver.Edge(options=edge_options)
 
 driver.get("https://fossd.netlify.app")
+vault_path = os.path.join(
+    os.environ["LOCALAPPDATA"],
+    "FalloutShelter",
+    "Vault2.sav"
+)
 time.sleep(2) 
 
 file_input = driver.find_element(By.ID, "sav_file")
-file_input.send_keys(r"C:\Users\hpie9\AppData\Local\FalloutShelter\Vault2.sav")
+file_input.send_keys(vault_path)
 time.sleep(2) 
 
 downloads_folder = os.path.expanduser(r"~\Downloads")

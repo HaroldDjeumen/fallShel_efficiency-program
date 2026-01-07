@@ -15,23 +15,30 @@ driver = webdriver.Edge(options=edge_options)
 driver.get("https://fossd.netlify.app")
 time.sleep(2)  
 
+downloads_folder = os.path.join(os.path.expanduser("~"), "Downloads")
+json_path = os.path.join(downloads_folder, "Vault3.json")
+
 file_input = driver.find_element(By.ID, "json_file")
-file_input.send_keys(r"C:\Users\hpie9\Downloads\Vault3.json")
-time.sleep(2)  
-os.remove(r"C:\Users\hpie9\Downloads\Vault3.json")
+file_input.send_keys(json_path)
+time.sleep(2)
+os.remove(json_path)
 
-# Path to Downloads folder
-downloads_folder = os.path.expanduser(r"~\Downloads")
-file_name = "Vault3.sav"  
-source_path = os.path.join(downloads_folder, file_name)
+# Paths for SAV file
+sav_name = "Vault3.sav"
+source_path = os.path.join(downloads_folder, sav_name)
 
-# Path to new directory
-destination_folder = r"C:\Users\hpie9\AppData\Local\FalloutShelter"  
-destination_path = os.path.join(destination_folder, file_name)
+fallout_folder = os.path.join(
+    os.environ["LOCALAPPDATA"],
+    "FalloutShelter"
+)
 
-# Move the new sav file to the target directory, replacing the old one
-os.remove(r"C:\Users\hpie9\AppData\Local\FalloutShelter\Vault3.sav")
-time.sleep(2)  # Ensure the file is deleted before moving
+destination_path = os.path.join(fallout_folder, sav_name)
+
+# Replace old SAV file
+if os.path.exists(destination_path):
+    os.remove(destination_path)
+
+time.sleep(2)
 shutil.move(source_path, destination_path)
 
 print(f"File moved to {destination_path}")
