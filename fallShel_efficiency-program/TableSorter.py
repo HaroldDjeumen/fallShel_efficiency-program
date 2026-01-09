@@ -19,7 +19,7 @@ delcount =0
 dwellercount =0
 
 downloads_folder = os.path.expanduser(r"~\Downloads")
-file_path = os.path.join(downloads_folder, "Vault2.json") 
+file_path = os.path.join(downloads_folder, "Vault1.json") 
 
 # Open and read the JSON file
 with open(file_path, "r", encoding="utf-8") as file:

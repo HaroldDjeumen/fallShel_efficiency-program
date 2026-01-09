@@ -7,7 +7,7 @@ COLUMNS = 26  #width
 vault = [[None for _ in range(COLUMNS)] for _ in range(ROWS)]
 
 downloads_folder = os.path.expanduser(r"~\Downloads")
-file_path = os.path.join(downloads_folder, "Vault2.json")
+file_path = os.path.join(downloads_folder, "Vault1.json")
 
 with open(file_path, "r", encoding="utf-8") as file:
     data = json.load(file)

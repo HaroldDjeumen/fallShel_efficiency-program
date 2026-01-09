@@ -10,7 +10,7 @@ conn = sqlite3.connect("vault.db")
 cursor = conn.cursor()
 
 downloads_folder = os.path.expanduser(r"~\Downloads")
-file_path = os.path.join(downloads_folder, "Vault2.json")
+file_path = os.path.join(downloads_folder, "Vault1.json")
 
 with open(file_path, "r", encoding="utf-8") as file:
     data = json.load(file)
@@ -520,6 +520,9 @@ def worst_dweller(room_key):
     _, stat, _ = parse_room(room_key)
     return min(sortedL[room_key], key=lambda d: dweller_stats.get(d, {}).get(stat, 0))
 
+recalc_mean_finder()
+before_balancing_times = dict(mean_finder)
+
 for pass_num in range(1, MAX_PASSES + 1):
     recalc_mean_finder()
     geo_mean, wap_mean, caf_mean = group_means(mean_finder)
@@ -578,6 +581,9 @@ for room, dwellers in sortedL.items():
     print(f"Room: {room} -> Dwellers: {', '.join(dwellers)}")
 print("")
 
+recalc_mean_finder()
+after_balancing_times = dict(mean_finder)
+
 mean_finder.clear()
 for room_key, dwellers in sortedL.items():
     t = get_room_production_time(room_key, dwellers, dweller_stats, happiness=vault_happiness/100)
@@ -587,11 +593,11 @@ for room_key, dwellers in sortedL.items():
 
 # --- Prepare arrays for plotting (exclude training rooms) ------------------
 exclude = {"Gym", "Armory", "Dojo"}
-rooms = [r for r in list(initial_mean_finder.keys()) if r[0] not in exclude]
+rooms = [r for r in list(before_balancing_times.keys()) if r[0] not in exclude]
 
 initial_times = {r: initial_mean_finder.get(r) for r in rooms}
-before_times = {r: mean_finder.get(r) for r in rooms}
-after_times = {r: mean_finder.get(r) for r in rooms}
+before_times = {r: before_balancing_times.get(r) for r in rooms}
+after_times = {r: after_balancing_times.get(r) for r in rooms}
 
 initial = [np.nan if initial_times.get(r) is None else initial_times[r] for r in rooms]
 before = [np.nan if before_times.get(r) is None else before_times[r] for r in rooms]

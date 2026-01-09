@@ -14,7 +14,7 @@ driver.get("https://fossd.netlify.app")
 vault_path = os.path.join(
     os.environ["LOCALAPPDATA"],
     "FalloutShelter",
-    "Vault2.sav"
+    "Vault1.sav"
 )
 time.sleep(2) 
 
@@ -23,4 +23,4 @@ file_input.send_keys(vault_path)
 time.sleep(2) 
 
 downloads_folder = os.path.expanduser(r"~\Downloads")
-file_path = os.path.join(downloads_folder, "Vault2.json") 
+file_path = os.path.join(downloads_folder, "Vault1.json") 
