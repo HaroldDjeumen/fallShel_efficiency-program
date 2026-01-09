@@ -1,67 +1,120 @@
-﻿from ast import Pass
+﻿from collections import defaultdict
 import os
 import json
-from queue import Empty
 import sqlite3
-from PIL import Image
-import numpy
+from matplotlib import pyplot as plt
+import numpy as np
 
-
+# --- Config / constants ----------------------------------------------------
 conn = sqlite3.connect("vault.db")
 cursor = conn.cursor()
 
-
 downloads_folder = os.path.expanduser(r"~\Downloads")
-file_path = os.path.join(downloads_folder, "Vault2.json") 
+file_path = os.path.join(downloads_folder, "Vault2.json")
 
-# Open and read the JSON file
 with open(file_path, "r", encoding="utf-8") as file:
     data = json.load(file)
-
 
 vault_file = "vault_map.txt"
 dwellers_list = data["dwellers"]["dwellers"]
 
+ROOM_CODE_MAP = {
+    "Geothermal": ("Power", "Strength"),
+    "Energy2": ("Power2", "Strength"),
+    "WaterPlant": ("Water", "Perception"),
+    "Water2": ("Water2", "Perception"),
+    "Cafeteria": ("Food", "Agility"),
+    "Hydroponic": ("Food2", "Agility")
+}
+
+ROOM_STAT_MAP = {
+    "Geothermal": "Strength",
+    "Energy2": "Strength",
+    "WaterPlant": "Perception",
+    "Water2": "Perception",
+    "Cafeteria": "Agility",
+    "Hydroponic": "Agility"
+}
+
+ROOM_GROUPS = {
+    "Power": ("Geothermal", "Energy2"),
+    "Water": ("WaterPlant", "Water2"),
+    "Food": ("Cafeteria", "Hydroponic")
+}
+
+BASE_POOL = {
+    "Power": 1320,
+    "Food": 960,
+    "Water": 960,
+    "Power2": 1800,
+    "Food2": 1200,
+    "Water2": 1200
+}
+
+SIZE_MULTIPLIER = {"size3": 1, "size6": 2, "size9": 3}
+ROOM_CAPACITY = {"size3": 2, "size6": 4, "size9": 6}
+
+# --- Storage ---------------------------------------------------------------
+initial_rooms = {}  # mapping room_key tuple -> list of dweller ids (strings)
+_room_counts = defaultdict(int)
+
+# --- Load production rooms -------------------------------------------------
+cursor.execute(
+    "SELECT dweller_id, RoomName, Row, Column, RoomLevel, MergeLevel FROM ProductionRoom",
+)
+production_rooms = cursor.fetchall()
+
+
+def _lvl_str(room_level: int) -> str:
+    return f"lvl{room_level if room_level in (1, 2) else 3}"
+
+
+def _size_str(merge_level: int) -> str:
+    if merge_level == 1:
+        return "size3"
+    if merge_level == 2:
+        return "size6"
+    return "size9"
+
+
+for dweller_ids, room_name, row, column, room_l, merge_l in production_rooms:
+    if room_name not in ROOM_STAT_MAP:
+        continue
+
+    dwellers = [x.strip() for x in str(dweller_ids).split(",") if x.strip()]
+
+    base_key = (room_name, _lvl_str(room_l), _size_str(merge_l))
+    _room_counts[base_key] += 1
+    room_number = str(_room_counts[base_key])
+    room_key = (base_key[0], base_key[1], base_key[2], room_number)
+    initial_rooms[room_key] = dwellers
+
+for key, dwellers in initial_rooms.items():
+    print(f"Room: {key} -> Dwellers: {', '.join(dwellers)}")
+
+# --- Parse vault_map.txt into room lists -----------------------------------
 geothermal = []
 waterPlant = []
 cafeteria = []
 gym = []
 armory = []
 dojo = []
-allStats = []
-bestGeo = []
-bestCaf = []
-bestWaP = []
-secbestGeo = []
-secbestCaf = []
-secbestWaP = []
-worstGeo = []
-worstCaf = []
-worstWaP = []
-sortedL = {}
-Stats = {}
-
-# initialize dweller_stats
-dweller_stats = {}
 
 try:
-    with open(vault_file, "r", encoding="utf-8") as file:
-        for line in file:
-            rooms = line.strip().split(" | ")
-
-            for room in rooms:
+    with open(vault_file, "r", encoding="utf-8") as f:
+        for line in f:
+            parts = line.strip().split(" | ")
+            for room in parts:
                 if room == "Empty":
                     continue
 
-                # Determine merge size
                 if "MergeLevel: 3" in room:
-                    size_val = 9
+                    size_s = "size9"
                 elif "MergeLevel: 2" in room:
-                    size_val = 6
+                    size_s = "size6"
                 else:
-                    size_val = 3
+                    size_s = "size3"
 
-                # Determine level
                 if "level= 3" in room:
                     lvl = 3
                 elif "level= 2" in room:
@@ -69,206 +122,200 @@ try:
                 else:
                     lvl = 1
 
-                # Append one entry per group
+                code = None
                 if "Energy2" in room:
-                    geothermal.append(f"En2-lvl{lvl}-size{size_val}-1")
-                elif "Hydroponic" in room:
-                    cafeteria.append(f"Hyd-lvl{lvl}-size{size_val}-1")
+                    code = "Energy2"
                 elif "Water2" in room:
-                    waterPlant.append(f"Wt2-lvl{lvl}-size{size_val}-1")
+                    code = "Water2"
+                elif "Hydroponic" in room:
+                    code = "Hydroponic"
                 elif "Geothermal" in room:
-                    geothermal.append(f"Goe-lvl{lvl}-size{size_val}-1")
+                    code = "Geothermal"
                 elif "WaterPlant" in room:
-                    waterPlant.append(f"WP-lvl{lvl}-size{size_val}-1")
+                    code = "WaterPlant"
                 elif "Cafeteria" in room:
-                    cafeteria.append(f"Caf-lvl{lvl}-size{size_val}-1")
+                    code = "Cafeteria"
                 elif "Gym" in room:
-                    gym.append(f"Arm-lvl{lvl}-size{size_val}-1")
+                    code = "Gym"
                 elif "Armory" in room:
-                    armory.append(f"Gym-lvl{lvl}-size{size_val}-1")
+                    code = "Armory"
                 elif "Dojo" in room:
-                    dojo.append(f"Dojo-lvl{lvl}-size{size_val}-1")
+                    code = "Dojo"
+
+                if not code:
+                    continue
+
+                room_tuple = (code, f"lvl{lvl}", size_s, "1")
+
+                if code in ("Energy2", "Geothermal"):
+                    geothermal.append(room_tuple)
+                elif code in ("WaterPlant", "Water2"):
+                    waterPlant.append(room_tuple)
+                elif code in ("Cafeteria", "Hydroponic"):
+                    cafeteria.append(room_tuple)
+                elif code == "Gym":
+                    gym.append(room_tuple)
+                elif code == "Armory":
+                    armory.append(room_tuple)
+                elif code == "Dojo":
+                    dojo.append(room_tuple)
 except FileNotFoundError:
     print(f"{vault_file} not found.")
 except Exception as e:
     print(f"An error occurred: {e}")
 
-RoomLists = [geothermal, waterPlant, cafeteria]
-TrainingRoomList = [gym, armory, dojo]
 
-for lst in RoomLists:
-    i = 0 
+# --- Normalize room lists: remove repeated tiles after merged rooms -------
+def compact_room_list(lst):
+    out = []
+    i = 0
     while i < len(lst):
-        val = lst[i]
-        if "size9" in val:
-            del lst[i+1 : i+1+8]
-            i += 1
-        elif "size6" in val:
-            del lst[i+1 : i+1+5]
-            i += 1
-        elif "size3" in val:
-            del lst[i+1 : i+1+2]
-            i += 1
+        out.append(lst[i])
+        size = lst[i][2]
+        if size == "size9":
+            i += 9
+        elif size == "size6":
+            i += 6
         else:
-            i += 1
+            i += 3
+    return out
 
-    count = 2
-    for x in range(len(lst)):
-        for j in range(x + 1, len(lst)):
-            if lst[x] == lst[j]:
-                parts = lst[x].rsplit("-",1)
-                lst[x] = parts[0] + "-" +str(count)
-                count += 1
 
-# sort level        
-for sortlst in RoomLists:
-    for i in range(len(sortlst) - 1):
-        for j in range(len(sortlst) - i - 1):
+RoomLists = [compact_room_list(geothermal), compact_room_list(waterPlant), compact_room_list(cafeteria)]
 
-            left_val = int(sortlst[j][-1:])
-            right_val = int(sortlst[j+1][-1:])
 
-            if left_val < right_val:
-                sortlst[j], sortlst[j+1] = sortlst[j+1], sortlst[j]
+def number_duplicates(lst):
+    counts = defaultdict(int)
+    out = []
+    for tup in lst:
+        base = (tup[0], tup[1], tup[2])
+        counts[base] += 1
+        out.append((base[0], base[1], base[2], str(counts[base])))
+    return out
 
+
+geothermal = number_duplicates(RoomLists[0])
+waterPlant = number_duplicates(RoomLists[1])
+cafeteria = number_duplicates(RoomLists[2])
+
+# --- Read dweller stats once and build fast lookup -------------------------
+Stats = {}
+dweller_stats = {}
 numDwellers = 0
 total_happiness = 0
 
 for d in dwellers_list:
     serialize_id = d.get("serializeId")
     happiness = d.get("happiness", {}).get("happinessValue", 0)
-    stats = ('Strength', 'Perception', 'Agility')
     numDwellers += 1
     total_happiness += happiness
 
     cursor.execute(
-        "SELECT dweller_id, StatName, Value, Mod FROM Stats WHERE StatName IN (?, ?, ?) AND dweller_id = ?",
-        (stats[0], stats[1], stats[2], serialize_id)
+        "SELECT dweller_id, StatName, Value, Mod FROM Stats WHERE dweller_id = ?",
+        (serialize_id,)
     )
     allStats = cursor.fetchall()
     Stats[serialize_id] = allStats
 
-    stat_map = {}
-    for _dwid, statname, value, mode in allStats:
-        stat_map[statname] = value + mode
+    stat_map = {statname: value + mode for _dwid, statname, value, mode in allStats}
     dweller_stats[str(serialize_id)] = stat_map
 
-    dwellerbeststats = {}
-    dwellersecbeststats = {}
-    dwellerworststats = {}
-
-    highest = -1
-    second_highest = -1
-    lowest = float("inf")
-
-    best_stat = None
-    second_stat = None
-    worst_stat = None
-
-    for dwellerid, statname, value, mode in allStats:
-        if dwellerid == serialize_id:
-            total = value + mode
-
-            # best
-            if total > highest:
-                second_highest = highest
-                second_stat = best_stat
-
-                highest = total
-                best_stat = statname
-
-            # second best
-            elif total > second_highest:
-                second_highest = total
-                second_stat = statname
-
-            # worst
-            if total < lowest:
-                lowest = total
-                worst_stat = statname
-
-    if best_stat == "Strength":
-        bestGeo.append(f"{dwellerid} - {highest} ")
-    elif best_stat == "Perception":
-        bestWaP.append(f"{dwellerid} - {highest} ")
-    elif best_stat == "Agility":
-        bestCaf.append(f"{dwellerid} - {highest} ")
-
-    if second_stat == "Strength":
-        secbestGeo.append(f"{dwellerid} - {second_highest} ")
-    elif second_stat == "Perception":
-        secbestWaP.append(f"{dwellerid} - {second_highest} ")
-    elif second_stat == "Agility":
-        secbestCaf.append(f"{dwellerid} - {second_highest} ")
-
-    if worst_stat == "Strength":
-        worstGeo.append(f"{dwellerid} - {lowest} ")
-    elif worst_stat == "Perception":
-        worstWaP.append(f"{dwellerid} - {lowest} ")
-    elif worst_stat == "Agility":
-        worstCaf.append(f"{dwellerid} - {lowest} ")
-
-    dwellerbeststats[dwellerid] = f"{highest} - {best_stat}"
-    dwellersecbeststats[dwellerid] = f"{second_highest} - {second_stat}"
-    dwellerworststats[dwellerid] = f"{lowest} - {worst_stat}"
-
-    print(dwellerbeststats)
-    print(dwellersecbeststats)
-    print(dwellerworststats)
+print(f"\nTotal Dwellers: {numDwellers}\n")
+print("Dweller Stats:")
+for dwid in Stats.keys():
+    print(f"Dweller ID: {dwid}")
+    for stat in Stats[dwid]:
+        print(f"  Stat: {stat[1]}, Value: {stat[2]}, Mod: {stat[3]}")
+    print("")
 
 vault_happiness = round(total_happiness / numDwellers) if numDwellers > 0 else 0
 print(f"\nVault Average Happiness: {vault_happiness}%\n")
 
-bestList = [bestGeo, bestWaP, bestCaf, secbestCaf, secbestWaP, secbestGeo, worstCaf, worstGeo, worstWaP]
+# --- Build best/second/worst lists efficiently -----------------------------
+bestGeo = []
+bestWaP = []
+bestCaf = []
+secbestGeo = []
+secbestWaP = []
+secbestCaf = []
+worstGeo = []
+worstWaP = []
+worstCaf = []
 
-for sortlst in bestList:
-    for i in range(len(sortlst) - 1):
-        for j in range(len(sortlst) - i - 1):
+for serialize_id, stats in dweller_stats.items():
+    values = {k: v for k, v in stats.items() if k in ("Strength", "Perception", "Agility")}
+    if not values:
+        continue
+    sorted_stats = sorted(values.items(), key=lambda kv: kv[1], reverse=True)
+    highest_stat, highest_val = sorted_stats[0]
+    second = sorted_stats[1] if len(sorted_stats) > 1 else (None, -1)
+    second_stat, second_val = second
+    lowest_stat, lowest_val = min(values.items(), key=lambda kv: kv[1])
 
-            left_val = int(sortlst[j].split(" - ")[1])
-            right_val = int(sortlst[j+1].split(" - ")[1])
+    if highest_stat == "Strength":
+        bestGeo.append(f"{serialize_id} - {highest_val}")
+    elif highest_stat == "Perception":
+        bestWaP.append(f"{serialize_id} - {highest_val}")
+    elif highest_stat == "Agility":
+        bestCaf.append(f"{serialize_id} - {highest_val}")
 
-            if left_val < right_val:
-                sortlst[j], sortlst[j+1] = sortlst[j+1], sortlst[j]
+    if second_stat == "Strength":
+        secbestGeo.append(f"{serialize_id} - {second_val}")
+    elif second_stat == "Perception":
+        secbestWaP.append(f"{serialize_id} - {second_val}")
+    elif second_stat == "Agility":
+        secbestCaf.append(f"{serialize_id} - {second_val}")
+
+    if lowest_stat == "Strength":
+        worstGeo.append(f"{serialize_id} - {lowest_val}")
+    elif lowest_stat == "Perception":
+        worstWaP.append(f"{serialize_id} - {lowest_val}")
+    elif lowest_stat == "Agility":
+        worstCaf.append(f"{serialize_id} - {lowest_val}")
+
+# sort lists
+bestGeo.sort(key=lambda s: int(s.split(" - ")[1]), reverse=True)
+bestWaP.sort(key=lambda s: int(s.split(" - ")[1]), reverse=True)
+bestCaf.sort(key=lambda s: int(s.split(" - ")[1]), reverse=True)
+secbestGeo.sort(key=lambda s: int(s.split(" - ")[1]))
+secbestWaP.sort(key=lambda s: int(s.split(" - ")[1]))
+secbestCaf.sort(key=lambda s: int(s.split(" - ")[1]))
+worstGeo.sort(key=lambda s: int(s.split(" - ")[1]))
+worstWaP.sort(key=lambda s: int(s.split(" - ")[1]))
+worstCaf.sort(key=lambda s: int(s.split(" - ")[1]))
+
 conn.close()
 
-def get_unassignedID(geolist, caflist, Waplist):
-    combined = []
-    combined.append(geolist)
-    combined.append(caflist)
-    combined.append(Waplist)
-    unassignedID_list= [item for sublist in combined for item in sublist]
-    return unassignedID_list 
-
-def get_unassigned_stat(stats, list):
-    ids = set(s.strip() for s in list)
-    stats[:] = [s for s in stats if s.split(" - ")[0].strip() in  ids]
-
+# --- Helper utility functions ----------------------------------------------
 def extract_ids(data):
     return [x.split(" - ")[0].strip() for x in data]
 
+
+def get_unassignedID(*lists):
+    return [item for sub in lists for item in sub]
+
+
+def get_unassigned_stat(stats_list, allowed_ids):
+    allowed = set(allowed_ids)
+    stats_list[:] = [s for s in stats_list if s.split(" - ")[0].strip() in allowed]
+
+
+sortedL = defaultdict(list)
+
+
 def assign_rooms(rooms, dwellers):
+    size_map = {"size9": 6, "size6": 4, "size3": 2}
     for room in rooms:
-        room_parts = room.split("-")
-        size = room_parts[2]
-
-        size_map = {
-            "size9": 6,
-            "size6": 4,
-            "size3": 2
-        }
-
-        LIMIT = size_map.get(size, 0)
-        key = tuple(room_parts)
-        current = len(sortedL.get(key, []))
-        take = LIMIT - current
-
-        if take > 0:
-            assigned = dwellers[:take]
+        size = room[2]
+        limit = size_map.get(size, 0)
+        assigned_now = len(sortedL[room])
+        take = limit - assigned_now
+        if take > 0 and dwellers:
+            to_assign = dwellers[:take]
             del dwellers[:take]
-            sortedL.setdefault(key, []).extend(assigned)
+            sortedL[room].extend(to_assign)
 
-# assigning values
+# --- Assign dwellers to production rooms (three rounds) --------------------
 geo_dwellers = extract_ids(bestGeo)
 caf_dwellers = extract_ids(bestCaf)
 wap_dwellers = extract_ids(bestWaP)
@@ -281,28 +328,27 @@ thi_geo_dwellers = extract_ids(worstGeo)
 thi_caf_dwellers = extract_ids(worstCaf)
 thi_wap_dwellers = extract_ids(worstWaP)
 
-
 # Round 1
 assign_rooms(geothermal, geo_dwellers)
 assign_rooms(waterPlant, wap_dwellers)
 assign_rooms(cafeteria, caf_dwellers)
 
-# Round 2
+# Round 2 (second best)
 secRdwellers = get_unassignedID(sec_geo_dwellers, sec_caf_dwellers, sec_wap_dwellers)
 get_unassigned_stat(secbestGeo, secRdwellers)
 get_unassigned_stat(secbestCaf, secRdwellers)
 get_unassigned_stat(secbestWaP, secRdwellers)
 assign_rooms(geothermal, sec_geo_dwellers)
-assign_rooms(waterPlant, sec_wap_dwellers) 
+assign_rooms(waterPlant, sec_wap_dwellers)
 assign_rooms(cafeteria, sec_caf_dwellers)
 
-# Round 3
-thiRdwellers= get_unassignedID(thi_geo_dwellers, thi_caf_dwellers, thi_wap_dwellers)
-get_unassigned_stat(worstGeo, thiRdwellers) 
+# Round 3 (third / worst)
+thiRdwellers = get_unassignedID(thi_geo_dwellers, thi_caf_dwellers, thi_wap_dwellers)
+get_unassigned_stat(worstGeo, thiRdwellers)
 get_unassigned_stat(worstCaf, thiRdwellers)
 get_unassigned_stat(worstWaP, thiRdwellers)
 assign_rooms(geothermal, thi_geo_dwellers)
-assign_rooms(waterPlant, thi_wap_dwellers) 
+assign_rooms(waterPlant, thi_wap_dwellers)
 assign_rooms(cafeteria, thi_caf_dwellers)
 
 # Left-over
@@ -313,235 +359,121 @@ for room, dwellers in sortedL.items():
     print(f"Room: {room} -> Dwellers: {', '.join(dwellers)}")
 print("")
 
-
-# TRAINING SECTION  
-
-# rebuild stat lists ONLY from leftover dwellers
+# --- Training assignments ---------------------------------------------------
 get_unassigned_stat(worstGeo, leftOver)
 get_unassigned_stat(worstCaf, leftOver)
 get_unassigned_stat(worstWaP, leftOver)
 
-# sort weakest first (low stat to high stat)
-for sortlst in (worstGeo, worstCaf, worstWaP):
-    sortlst.sort(key=lambda x: int(x.split(" - ")[1]))
+for lst in (worstGeo, worstCaf, worstWaP):
+    lst.sort(key=lambda x: int(x.split(" - ")[1]))
 
-train_geo = extract_ids(worstGeo)
-train_caf = extract_ids(worstCaf)
-train_wap = extract_ids(worstWaP)
+assign_rooms(gym, extract_ids(worstGeo))
+assign_rooms(dojo, extract_ids(worstCaf))
+assign_rooms(armory, extract_ids(worstWaP))
 
-assign_rooms(gym, train_geo)       
-assign_rooms(dojo, train_caf)      
-assign_rooms(armory, train_wap)   
-
-
-# Round 2
+# second round training
 get_unassigned_stat(secbestGeo, leftOver)
 get_unassigned_stat(secbestCaf, leftOver)
 get_unassigned_stat(secbestWaP, leftOver)
 
-for sortlst in (secbestGeo, secbestCaf, secbestWaP):
-    sortlst.sort(key=lambda x: int(x.split(" - ")[1]))
+for lst in (secbestGeo, secbestCaf, secbestWaP):
+    lst.sort(key=lambda x: int(x.split(" - ")[1]))
 
-train_geo_2 = extract_ids(secbestGeo)
-train_caf_2 = extract_ids(secbestCaf)
-train_wap_2 = extract_ids(secbestWaP)
+assign_rooms(gym, extract_ids(secbestGeo))
+assign_rooms(dojo, extract_ids(secbestCaf))
+assign_rooms(armory, extract_ids(secbestWaP))
 
-assign_rooms(gym, train_geo_2)
-assign_rooms(dojo, train_caf_2)
-assign_rooms(armory, train_wap_2)
-
-
-# Round 3
+# third round training
 get_unassigned_stat(bestGeo, leftOver)
 get_unassigned_stat(bestCaf, leftOver)
 get_unassigned_stat(bestWaP, leftOver)
 
-for sortlst in (bestGeo, bestCaf, bestWaP):
-    sortlst.sort(key=lambda x: int(x.split(" - ")[1]))
+for lst in (bestGeo, bestCaf, bestWaP):
+    lst.sort(key=lambda x: int(x.split(" - ")[1]))
 
-train_geo_3 = extract_ids(bestGeo)
-train_caf_3 = extract_ids(bestCaf)
-train_wap_3 = extract_ids(bestWaP)
+assign_rooms(gym, extract_ids(bestGeo))
+assign_rooms(dojo, extract_ids(bestCaf))
+assign_rooms(armory, extract_ids(bestWaP))
 
-assign_rooms(gym, train_geo_3)
-assign_rooms(dojo, train_caf_3)
-assign_rooms(armory, train_wap_3)
-
-    
 print("\nTraining Rooms:")
 for room, dwellers in sortedL.items():
-    if room[0] in ("Gym", "Arm", "Dojo"):
+    if room[0] in ("Gym", "Armory", "Dojo"):
         print(f"Room: {room} -> Dwellers: {', '.join(dwellers)}")
 print("")
 
 allDwellerIDs = {str(d["serializeId"]) for d in dwellers_list}
-
 assigned = set()
 for dwellers in sortedL.values():
     assigned.update(dwellers)
-
 finalRemaining = list(allDwellerIDs - assigned)
 
 print("\nFinal Unassigned Dwellers:")
 print(", ".join(finalRemaining))
 
-
-# Plot Section
-
-from matplotlib import pyplot as plt
-from collections import defaultdict
-
-rooms_by_type = defaultdict(list)
-
-ROOM_CODE_MAP = {
-    "Goe": ("Power", "Strength"),
-    "En2": ("Power", "Strength"),
-    "WP":  ("Water", "Perception"),
-    "Wt2": ("Water", "Perception"),
-    "Caf": ("Food", "Agility"),
-    "Hyd": ("Food", "Agility"),
-}
-
-BASE_POOL = {
-    "Power": 1320,
-    "Food": 960,
-    "Water": 960
-}
-
-SIZE_MULTIPLIER = {
-    "size3": 1,
-    "size6": 2,
-    "size9": 3
-}
-
-ROOM_CAPACITY = {
-    "size3": 2,
-    "size6": 4,
-    "size9": 6
-}
-
-def room_capacity(room):
-    return ROOM_CAPACITY[room[2]]
-
-
+# --- Production time helpers -----------------------------------------------
 def parse_room(room_key):
-    # room_key is tuple: ('Goe','lvl3','size6','1')
     code = room_key[0]
     size = room_key[2]
-
     room_type, stat = ROOM_CODE_MAP.get(code, (None, None))
     return room_type, stat, size
 
+
 def get_room_production_time(room_key, dwellers, dweller_stats, happiness=1.0):
     room_type, stat, size = parse_room(room_key)
-    if room_type is None:
+    if room_type is None or not dwellers:
         return None
-
     pool = BASE_POOL[room_type] * SIZE_MULTIPLIER[size]
-
-    total_stat = sum(dweller_stats[d][stat] for d in dwellers)
+    total_stat = sum(dweller_stats.get(d, {}).get(stat, 0) for d in dwellers)
     if total_stat == 0:
         return None
-
     return round(pool / (total_stat * happiness), 1)
 
+
+initial_mean_finder = {}
 mean_finder = {}
+
+print("\nTIME BEFORE ANY CHANGES")
+for room_key, dwellers in initial_rooms.items():
+    t = get_room_production_time(room_key, dwellers, dweller_stats, happiness=vault_happiness/100)
+    if t:
+        initial_mean_finder[room_key] = t
+        print(f"{room_key} -> {t} seconds")
 
 print("\nTIME")
 for room_key, dwellers in sortedL.items():
-    time_sec = get_room_production_time(
-        room_key,
-        dwellers,
-        dweller_stats,
-        happiness=vault_happiness/100
+    t = get_room_production_time(room_key, dwellers, dweller_stats, happiness=vault_happiness/100)
+    if t:
+        mean_finder[room_key] = t
+        print(f"{room_key} -> {t} seconds")
+
+
+# --- Compute group means once (safety guards) -------------------------------
+def group_means(mean_map):
+    geo = [t for r, t in mean_map.items() if r[0] in ("Geothermal", "Energy2")]
+    wap = [t for r, t in mean_map.items() if r[0] in ("WaterPlant", "Water2")]
+    caf = [t for r, t in mean_map.items() if r[0] in ("Cafeteria", "Hydroponic")]
+    return (
+        (sum(geo) / len(geo)) if geo else None,
+        (sum(wap) / len(wap)) if wap else None,
+        (sum(caf) / len(caf)) if caf else None,
     )
 
-    if time_sec:
-        print(f"{room_key} -> {time_sec} seconds")
-        mean_finder[room_key] = time_sec
 
-# initialize accumulators before the loop
-geo_sum_of_time = 0.0
-geo_total = 0
-wap_sum_of_time = 0.0
-wap_total = 0
-caf_sum_of_time = 0.0
-caf_total = 0
+geo_mean, wap_mean, caf_mean = group_means(mean_finder)
 
-# iterate items() to get (room_key, time) pairs
-for room, time in mean_finder.items():
-    roomtype = room[0]
-
-    if roomtype in ("Goe", "En2"):
-        geo_sum_of_time += time
-        geo_total += 1
-
-    elif roomtype in ("WP", "Wt2"):
-        wap_sum_of_time += time
-        wap_total += 1
-
-    elif roomtype in ("Caf", "Hyd"):
-        caf_sum_of_time += time
-        caf_total += 1
-
-# compute means after counts are complete and guard against zero
-geo_mean = (geo_sum_of_time / geo_total) if geo_total > 0 else None
-wap_mean = (wap_sum_of_time / wap_total) if wap_total > 0 else None
-caf_mean = (caf_sum_of_time / caf_total) if caf_total > 0 else None
-
-print("\nAVERAGE TIME")
-if geo_total > 0:
-    print(f"Geothermal Average Time: {round(geo_mean,1)} seconds")
-
-if wap_total > 0:
+if geo_mean is not None:
+    print(f"\nGeothermal Average Time: {round(geo_mean,1)} seconds")
+if wap_mean is not None:
     print(f"Water Plant Average Time: {round(wap_mean,1)} seconds")
-
-if caf_total > 0:
+if caf_mean is not None:
     print(f"Cafeteria Average Time: {round(caf_mean,1)} seconds")
 
-upper_mean = []
-lower_mean = []
-
-for room, time in mean_finder.items():
-    roomtype = room[0]
-
-    if roomtype in ("Goe", "En2"):
-        if time > geo_mean:
-            upper_mean.append(f"{room} -> {time}")
-        else:
-            lower_mean.append(f"{room} -> {time}")
-
-    elif roomtype in ("WP", "Wt2"):
-        if time > wap_mean:
-            upper_mean.append(f"{room} -> {time}")
-        else:
-            lower_mean.append(f"{room} -> {time}")
-
-    elif roomtype in ("Caf", "Hyd"):
-        if time > caf_mean:
-            upper_mean.append(f"{room} -> {time}")
-        else:
-            lower_mean.append(f"{room} -> {time}")
-
-print("\nRooms Above Average Time:")
-for entry in upper_mean:
-    print(f"{entry} seconds")
-
-print("\nRooms Below Average Time:")
-for entry in lower_mean:
-    print(f"{entry} seconds")
-
-# Before balancing times
-before_times = {room: get_room_production_time(room, dwellers, dweller_stats, happiness=vault_happiness/100)
-                for room, dwellers in sortedL.items()}
-
-BALANCE_THRESHOLD = 5.0  
-
+# --- STAT ADJUSTMENT SUGGESTIONS -------------------------------------------
 print("\nSTAT ADJUSTMENT SUGGESTIONS")
-
 for room_key, time in mean_finder.items():
     room_type, stat, size = parse_room(room_key)
-
+    if room_type is None:
+        continue
     if room_type == "Power":
         target = geo_mean
     elif room_type == "Water":
@@ -550,202 +482,137 @@ for room_key, time in mean_finder.items():
         target = caf_mean
     else:
         continue
-
     pool = BASE_POOL[room_type] * SIZE_MULTIPLIER[size]
     dwellers = sortedL[room_key]
-    current_total = sum(dweller_stats[d][stat] for d in dwellers)
-
+    current_total = sum(dweller_stats.get(d, {}).get(stat, 0) for d in dwellers)
+    if not target:
+        continue
     ideal_total = pool / (target * (vault_happiness / 100))
     diff = round(ideal_total - current_total, 1)
-
     if abs(diff) < 0.5:
         status = "Balanced"
     elif diff > 0:
         status = f"Needs +{diff} {stat}"
     else:
         status = f"Remove {abs(diff)} {stat}"
-
     print(f"{room_key} | Time: {time}s | {status}")
 
-
-def get_total_stat(room_key):
-    room_type, stat, _ = parse_room(room_key)
-    return sum(dweller_stats[d][stat] for d in sortedL[room_key])
-
-def best_dweller(room_key):
-    room_type, stat, _ = parse_room(room_key)
-    return max(sortedL[room_key], key=lambda d: dweller_stats[d][stat])
-
-def worst_dweller(room_key):
-    room_type, stat, _ = parse_room(room_key)
-    return min(sortedL[room_key], key=lambda d: dweller_stats[d][stat])
+# --- Auto-balancing (limited passes, efficient selection) -------------------
+TRAINING_ROOMS = {"Armory", "Dojo", "Gym"}
+BALANCE_THRESHOLD = 5.0
+MAX_PASSES = 10
 
 
-print("\nAUTO BALANCING ROOMS")
-
-ROOM_GROUPS = {
-    "Power": ("Goe", "En2"),
-    "Water": ("WP", "Wt2"),
-    "Food": ("Caf", "Hyd")
-}  
-
-TRAINING_ROOMS = {"Arm", "Dojo", "Gym"}
-
-def has_space(room_key):
-    _, _, size = parse_room(room_key)
-    return len(sortedL[room_key]) < ROOM_CAPACITY[size]
-
-def recalc_times():
+def recalc_mean_finder():
     mean_finder.clear()
     for room_key, dwellers in sortedL.items():
-        t = get_room_production_time(
-            room_key,
-            dwellers,
-            dweller_stats,
-            happiness=vault_happiness / 100
-        )
+        t = get_room_production_time(room_key, dwellers, dweller_stats, happiness=vault_happiness / 100)
         if t:
             mean_finder[room_key] = t
 
-def is_balanced():
-    for room_key, time in mean_finder.items():
-        room_type, _, _ = parse_room(room_key)
 
-        if room_type == "Power" and abs(time - geo_mean) > BALANCE_THRESHOLD:
-            return False
-        if room_type == "Water" and abs(time - wap_mean) > BALANCE_THRESHOLD:
-            return False
-        if room_type == "Food" and abs(time - caf_mean) > BALANCE_THRESHOLD:
-            return False
+def best_dweller(room_key):
+    _, stat, _ = parse_room(room_key)
+    return max(sortedL[room_key], key=lambda d: dweller_stats.get(d, {}).get(stat, 0))
 
-    return True
 
-# More is not always better 
-MAX_PASSES = 12 
-pass_num = 1
+def worst_dweller(room_key):
+    _, stat, _ = parse_room(room_key)
+    return min(sortedL[room_key], key=lambda d: dweller_stats.get(d, {}).get(stat, 0))
 
-# corrected balancing loop
-while pass_num <= MAX_PASSES:
-    recalc_times()  # refresh mean_finder
+for pass_num in range(1, MAX_PASSES + 1):
+    recalc_mean_finder()
+    geo_mean, wap_mean, caf_mean = group_means(mean_finder)
+    if not mean_finder:
+        break
 
-    # recompute group means
-    geo_times = [t for r,t in mean_finder.items() if r[0] in ("Goe","En2")]
-    wap_times = [t for r,t in mean_finder.items() if r[0] in ("WP","Wt2")]
-    caf_times = [t for r,t in mean_finder.items() if r[0] in ("Caf","Hyd")]
+    def is_balanced_local():
+        for r, t in mean_finder.items():
+            rtype, _, _ = parse_room(r)
+            target = geo_mean if rtype in ("Geothermal", "Energy2") else \
+                     wap_mean if rtype in ("WaterPlant", "Water2") else \
+                     caf_mean if rtype in ("Cafeteria", "Hydroponic") else None
+            if target is None:
+                continue
+            if abs(t - target) > BALANCE_THRESHOLD:
+                return False
+        return True
 
-    geo_mean = (sum(geo_times)/len(geo_times)) if geo_times else None
-    wap_mean = (sum(wap_times)/len(wap_times)) if wap_times else None
-    caf_mean = (sum(caf_times)/len(caf_times)) if caf_times else None
-
-    # Sadly, we will never see this message
-    if is_balanced():
-        print(f"\nBalanced after {pass_num} passes")
+    if is_balanced_local():
+        print(f"\nBalanced after {pass_num - 1} passes")
         break
 
     print(f"\nBALANCE PASS {pass_num}")
-
     for room_type, codes in ROOM_GROUPS.items():
         rooms = [r for r in mean_finder if r[0] in codes and r[0] not in TRAINING_ROOMS]
         if len(rooms) < 2:
             continue
-
         weakest = max(rooms, key=lambda r: mean_finder[r])
         strongest = min(rooms, key=lambda r: mean_finder[r])
         if weakest == strongest:
             continue
-
-        # check after weakest/strongest are defined
         if weakest[0] in TRAINING_ROOMS or strongest[0] in TRAINING_ROOMS:
             continue
 
         if sortedL.get(strongest) and sortedL.get(weakest):
             give = best_dweller(strongest)
             take = worst_dweller(weakest)
-
             sortedL[strongest].remove(give)
             sortedL[weakest].remove(take)
-
             sortedL[strongest].append(take)
             sortedL[weakest].append(give)
-
             print(f"Swapped {give} ↔ {take} between {strongest} and {weakest}")
-
         elif sortedL.get(strongest):
             mover = best_dweller(strongest)
             sortedL[strongest].remove(mover)
             sortedL[weakest].append(mover)
             print(f"Moved {mover} from {strongest} → {weakest}")
-
         elif finalRemaining:
             mover = finalRemaining.pop(0)
             sortedL[weakest].append(mover)
             print(f"Assigned {mover} → {weakest}")
 
-    pass_num += 1
-
-    # Build `after_times` for all rooms so keys match `before_times` even if
-    # `get_room_production_time` returns None for training rooms. This prevents
-    # KeyError when comparing before/after dictionaries.
-    after_times = {
-        room: get_room_production_time(room, dwellers, dweller_stats, happiness=vault_happiness/100)
-        for room, dwellers in sortedL.items()
-    }
-
-
+# --- Print final mapping and compute times ---------------------------------
 print("")
 for room, dwellers in sortedL.items():
     print(f"Room: {room} -> Dwellers: {', '.join(dwellers)}")
 print("")
 
-print("\n NEW TIME")
+mean_finder.clear()
 for room_key, dwellers in sortedL.items():
-    time_sec = get_room_production_time(
-        room_key,
-        dwellers,
-        dweller_stats,
-        happiness=vault_happiness/100
-    )
+    t = get_room_production_time(room_key, dwellers, dweller_stats, happiness=vault_happiness/100)
+    if t:
+        mean_finder[room_key] = t
+        print(f"{room_key} -> {t} seconds")
 
-    if time_sec:
-        print(f"{room_key} -> {time_sec} seconds")
-        mean_finder[room_key] = time_sec
-       
-print("\nNEW AVERAGE TIME")
-if geo_total > 0:
-    print(f"Geothermal Average Time: {round(geo_mean,1)} seconds")
+# --- Prepare arrays for plotting (exclude training rooms) ------------------
+exclude = {"Gym", "Armory", "Dojo"}
+rooms = [r for r in list(initial_mean_finder.keys()) if r[0] not in exclude]
 
-if wap_total > 0:
-    print(f"Water Plant Average Time: {round(wap_mean,1)} seconds")
+initial_times = {r: initial_mean_finder.get(r) for r in rooms}
+before_times = {r: mean_finder.get(r) for r in rooms}
+after_times = {r: mean_finder.get(r) for r in rooms}
 
-if caf_total > 0:
-    print(f"Cafeteria Average Time: {round(caf_mean,1)} seconds")
+initial = [np.nan if initial_times.get(r) is None else initial_times[r] for r in rooms]
+before = [np.nan if before_times.get(r) is None else before_times[r] for r in rooms]
+after = [np.nan if after_times.get(r) is None else after_times[r] for r in rooms]
 
+initial_arr = np.array(initial, dtype=float)
+before_arr = np.array(before, dtype=float)
+after_arr = np.array(after, dtype=float)
 
-rooms = list(before_times.keys())
+x = np.arange(len(rooms))
+width = 0.25
 
-# Ensure `after_times` exists (balancing loop may not run) and align keys
-try:
-    after_times
-except NameError:
-    after_times = {room: None for room in sortedL}
+plt.figure(figsize=(12, 6))
+plt.bar(x - width, initial_arr, width=width, label="Initial")
+plt.bar(x, before_arr, width=width, label="Before Balancing")
+plt.bar(x + width, after_arr, width=width, label="After Balancing")
 
-# Convert None -> NaN so matplotlib can handle missing values
-before = [numpy.nan if before_times.get(r) is None else before_times[r] for r in rooms]
-after = [numpy.nan if after_times.get(r) is None else after_times[r] for r in rooms]
-
-# Use numpy arrays for numeric operations
-before_arr = numpy.array(before, dtype=float)
-after_arr = numpy.array(after, dtype=float)
-
-x = range(len(rooms))  
-
-plt.figure(figsize=(12,6))
-plt.bar(x, before_arr, width=0.4, label='Before Balancing', align='edge')
-plt.bar(x, after_arr, width=-0.4, label='After Balancing', align='edge')
-
-plt.xticks(x, [f"{r[0]}-{r[1]}-{r[3]}" for r in rooms], rotation=45)  # show room type and level
+plt.xticks(ticks=x, labels=[f"{r[0]}-{r[1]}-{r[3]}" for r in rooms], rotation=45, ha="right")
 plt.ylabel("Production Time (s)")
 plt.title("Room Production Times Before and After Balancing")
 plt.legend()
 plt.tight_layout()
 plt.show()
+
