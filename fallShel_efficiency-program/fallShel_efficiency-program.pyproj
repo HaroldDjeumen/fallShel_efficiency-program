@@ -22,7 +22,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="fallShel_efficiency_program.py" />
-    <Compile Include="modCalc.py" />
+    <Compile Include="AESencryption.py" />
     <Compile Include="placementCalc.py" />
     <Compile Include="sav_fetcher.py" />
     <Compile Include="sav_replacer.py" />

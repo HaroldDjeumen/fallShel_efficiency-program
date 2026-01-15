@@ -1,0 +1,92 @@
+﻿TYPE,NAME,ITEM ID,S,P,E,C,I,A,L,SEX,RARITY / WORNBY
+Vault Suit,Armored vault suit,UtilityJumpsuit,,3,,,,,,,Common
+,Sturdy vault suit,UtilityJumpsuit_Sturdy,,5,,,,,,,Rare
+,Heavy vault suit,UtilityJumpsuit_Heavy,,7,,,,,,,Legendary
+Battle Armor,Battle armor,BattleArmor,2,,1,,,,,,Common
+,Sturdy battle armor,BattleArmor_Sturdy,3,,2,,,,,,Rare
+,Heavy battle armor,BattleArmor_Heavy,4,,3,,,,,,Legendary
+Combat Armor,Combat armor,CombatArmor,2,,,,,1,,,Common
+,Sturdy combat armor,CombatArmor_Sturdy,3,,,,,2,,,Rare
+,Heavy combat armor,CombatArmor_Heavy,4,,,,,3,,,Legendary
+Formal Wear,Formal wear,FormalWear,,,,,,,3,,Common
+,Fancy formal wear,FormalWear_Fancy,,,,,,,5,,Rare
+,Lucky formal wear,FormalWear_Lucky,,,,,,,7,,Legendary
+Handyman Jumpsuit,Handyman jumpsuit,HandymanJumpsuit,,,,,,3,,,Common
+,Advanced jumpsuit,HandymanJumpsuit_Advanced,,,,,,5,,,Rare
+,Expert jumpsuit,HandymanJumpsuit_Expert,,,,,,7,,,Legendary
+Lab Coat,Lab coat,LabCoat,,,,,3,,,,Common
+,Advanced lab coat,LabCoat_Advanced,,,,,5,,,,Rare
+,Expert lab coat,LabCoat_Expert,,,,,7,,,,Legendary
+Leather Armor,Leather armor,WandererArmor,1,,2,,,,,,Common
+,Sturdy leather armor,WandererArmor_Sturdy,2,,3,,,,,,Rare
+,Heavy leather armor,WandererArmor_Heavy,3,,4,,,,,,Legendary
+Merc Gear,Merc gear,RiotGear,,1,,,,1,1,,Common
+,Sturdy merc gear,RiotGear_Sturdy,,1,,,,2,2,,Rare
+,Heavy merc gear,RiotGear_Heavy,,2,,,,3,2,,Legendary
+Fatigues,Military fatigues,MilitaryJumpsuit,3,,,,,,,,Common
+,Officer fatigues,MilitaryJumpsuit_Officer,5,,,,,,,,Rare
+,Commander fatigues,MilitaryJumpsuit_Commander,7,,,,,,,,Legendary
+Nightwear,Nightwear,AllNightware,,,,3,,,,,Common
+,Naughty nightwear,AllNightware_Naughty,,,,5,,,,,Rare
+,Lucky nightwear,AllNightware_Lucky,,,,7,,,,,Legendary
+Officer Uniform,Junior officer uniform,ScientistScrubs,,,,1,2,,,,Common
+,Officer uniform,ScientistScrubs_Commander,,,,2,3,,,,Rare
+,Commander uniform,ScientistScrubs_Officer,,,,3,4,,,,Legendary
+Radiation Suit,Radiation suit,RadiationSuit,,1,2,,,,,,Common
+,Advanced radiation suit,RadiationSuit_Advanced,,2,3,,,,,,Rare
+,Expert radiation suit,RadiationSuit_Expert,,3,4,,,,,,Legendary
+Raider Armor,Raider armor,RaiderArmor,,1,,,,2,,,Common
+,Sturdy raider armor,RaiderArmor_Sturdy,,2,,,,3,,,Rare
+,Heavy raider armor,RaiderArmor_Heavy,,3,,,,4,,,Legendary
+Scribe Robe,Initiate robe,ScribeRobe_Initiate,,,,2,,1,,,Common
+,Scribe robe,ScribeRobe,,,,3,,2,,,Rare
+,Scribe Rothchild's robe,RothchildSpecial,,2,1,2,2,,,,Legendary
+Wasteland Gear,Wasteland gear,HazmatSuit,,,3,,,,,,Common
+,Sturdy wasteland gear,HazmatSuit_Sturdy,,,5,,,,,,Rare
+,Heavy wasteland gear,HazmatSuit_Heavy,,,7,,,,,,Legendary
+Wasteland Medic,Wasteland medic,WastelandSurgeon_Settler,,2,,,,,1,,Common
+,Wasteland doctor,WastelandSurgeon_Doctor,,3,,,,,2,,Rare
+,Wasteland surgeon,WastelandSurgeon,,4,,,,,3,,Legendary
+,Clergy outfit,BishopSpecial,,,,4,,,1,M,Rare
+,Comedian outfit,ComedianSpecial,,2,,2,,,1,,Rare
+,Engineer outfit,EngineerSpecial,,,2,,2,,1,,Rare
+,Greaser outfit,GreaserSpecial,,,,2,,2,1,,Rare
+,Horror fan outfit,SlasherSpecial,,,4,,,,1,,Rare
+,Knight armor,KnightSpecial,2,2,,,,,1,,Rare
+,Librarian outfit,LibrarianSpecial,,,,,4,,1,F,Rare
+,Mayor outfit,MayorSpecial,,,,2,2,,1,,Rare
+,Medieval ruler outfit,KingSpecial,,2,,2,,,1,,Rare
+,Movie fan outfit,MoviefanSpecial,,4,,,,,1,F,Rare
+,Ninja outfit,NinjaSuit,,,,,,4,1,,Rare
+,Nobility outfit,PrinceSpecial,,,2,,2,,1,M,Rare
+,Professor outfit,ProfessorSpecial,,,,,4,,1,,Rare
+,Republic robes,EmpressSpecial,,,,4,,,1,F,Rare
+,Sci-fi fan outfit,ScifiSpecial,,,,,2,2,1,,Rare
+,Soldier uniform,SoldierSpecial,2,,2,,,,1,,Rare
+,Sports fan outfit,SportsfanSpecial,4,,,,,,1,M,Rare
+,Surgeon outfit,SurgeonSpecial,,2,,,,2,1,,Rare
+,Survivor armor,SurvivorSpecial,2,,,,,2,1,M,Rare
+,Wrestler outfit,WrestlerSpecial,2,,2,,,,1,M,Rare
+,Autumn's uniform,ColonelSpecial,2,2,2,1,,,,M,Augustus Autumn
+,Bittercup's outfit,BittercupSpecial,2,2,2,1,,,,F,Bittercup
+,Confessor Cromwell's rags,CromwellSpecial,,2,2,,1,,2,M,Confessor Cromwell
+,Elder robe,ElderLyonsSpecial,,,,4,,3,,M,Elder Lyons
+,Eulogy Jones' suit,EulogyJonesSpecial,,2,,2,1,,2,M,Eulogy Jones
+,Minuteman uniform,PrestonSpecial,2,2,,,2,2,,M,Preston Garvey
+,Scribe Rothchild's robe,RothchildSpecial,,2,1,2,2,,,M,Scribe Rothchild
+,Sheriff's duster,LucasSpecial,,2,5,,,,,M,Lucas Simms
+,Tenpenny's suit,AlistairSpecial,,2,,2,2,,1,M,Allistair Tenpenny
+,Three Dog's outfit,ThreedogSpecial,,2,,5,,,,M,Three Dog
+,Tunnel Snakes' outfit,ButchSpecial,,2,1,2,,2,,M,Butch
+T-45,T-45a power armor,PowerArmor,2,3,,,,,,,Legendary
+,T-45d power armor,PowerArmor_T45d,2,4,,,,,,,Legendary
+,T-45f power armor,PowerArmor_T45f,2,5,,,,,,,Legendary
+T-51,T-51a power armor,PowerArmor_51a,3,1,,,,,,,Legendary
+,T-51d power armor,PowerArmor_51d,3,2,,,,,,,Legendary
+,T-51f power armor,PowerArmor_51f,4,3,,,,,,,Legendary
+T-60,T-60a power armor,PowerArmor_T60a,2,,3,,,,,,Legendary
+,T-60d power armor,PowerArmor_T60d,2,,4,,,,,,Legendary
+,T-60f power armor,PowerArmor_T60f,1,1,5,,,,,,Legendary
+Enclave Armor,X-01 Mk I power armor,PowerArmor_MkI,3,1,1,,,,,,Legendary
+,X-01 Mk IV power armor,PowerArmor_MkIV,4,1,1,,,,,,Legendary
+,X-01 Mk VI power armor,PowerArmor_MkVI,5,1,1,,,,,,Legendary
