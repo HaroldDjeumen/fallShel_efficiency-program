@@ -1,5 +1,6 @@
 ﻿from collections import defaultdict
 import os
+import time
 import json
 import sqlite3
 from matplotlib import pyplot as plt
@@ -474,7 +475,7 @@ def run(json_path):
 
     # --- STAT ADJUSTMENT SUGGESTIONS -------------------------------------------
     print("\nSTAT ADJUSTMENT SUGGESTIONS")
-    for room_key, time in mean_finder.items():
+    for room_key, prod_time in mean_finder.items():
         room_type, stat, size = parse_room(room_key)
         if room_type is None:
             continue
@@ -499,7 +500,7 @@ def run(json_path):
             status = f"Needs +{diff} {stat}"
         else:
             status = f"Remove {abs(diff)} {stat}"
-        print(f"{room_key} | Time: {time}s | {status}")
+        print(f"{room_key} | Time: {prod_time}s | {status}")
 
     # --- Auto-balancing (limited passes, efficient selection) -------------------
     TRAINING_ROOMS = {"Armory", "Dojo", "Gym"}
@@ -624,5 +625,10 @@ def run(json_path):
     plt.title("Room Production Times Before and After Balancing")
     plt.legend()
     plt.tight_layout()
-    plt.show()
 
+    # Save the plot instead of showing it interactively
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    plot_filename = f"vault_production_{timestamp}.png"
+    plt.savefig(plot_filename, dpi=150, bbox_inches='tight')
+    plt.close()  # Close the figure to free memory
+    print(f"Plot saved as: {plot_filename}")
