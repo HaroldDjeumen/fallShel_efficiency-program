@@ -15,86 +15,78 @@ def is_base64(data: bytes) -> bool:
         return False
 
 
-def get_key():
-    """Generate key using PBKDF2, matching Java implementation"""
+def get_key_and_iv():
     key_iv = PBKDF2(
         PASS_PHRASE,
         INIT_VECTOR,
-        dkLen=48,  # 384 bits = 48 bytes
+        dkLen=48,
         count=1000
     )
-    key = key_iv[:32]  # First 32 bytes for AES-256 key
-    # Note: Java generates IV from PBKDF2 but then uses original INIT_VECTOR
-    return key
+    key = key_iv[:32]
+    iv = key_iv[32:48]
+    return key, iv
 
 
-def decrypt_data(text: bytes) -> bytes:
+def decrypt_data(payload) -> str:
     """
-    Decrypt data matching Java implementation.
-    Uses PBKDF2-derived key but original INIT_VECTOR as IV.
+    Accepts either base64/text bytes, or raw encrypted bytes.
+    If payload is base64-encoded, it will be decoded first; otherwise it's treated
+    as the raw AES-CBC ciphertext. Returns a UTF-8 string.
     """
-    key = get_key()
-    # Use original INIT_VECTOR as IV (matching Java code)
-    cipher = AES.new(key, AES.MODE_CBC, INIT_VECTOR)
-    decoded = base64.b64decode(text)
-    decrypted = unpad(cipher.decrypt(decoded), AES.block_size)
-    return decrypted
+    key, iv = get_key_and_iv()
+    cipher = AES.new(key, AES.MODE_CBC, iv)
 
-
-def encrypt_data(data) -> bytes:
-    """
-    Encrypt data matching Java implementation.
-    Accepts either bytes or str. Returns base64-encoded bytes.
-    """
-    if isinstance(data, str):
-        data_bytes = data.encode("utf-8")
+    # normalize to bytes
+    if isinstance(payload, str):
+        data_bytes = payload.encode("utf-8")
     else:
-        data_bytes = data
-    
-    key = get_key()
-    # Use original INIT_VECTOR as IV (matching Java code)
-    cipher = AES.new(key, AES.MODE_CBC, INIT_VECTOR)
-    encrypted = cipher.encrypt(pad(data_bytes, AES.block_size))
+        data_bytes = payload
+
+    # If it's base64-encoded text, decode it first; otherwise treat as raw ciphertext
+    if is_base64(data_bytes):
+        try:
+            decoded = base64.b64decode(data_bytes)
+        except Exception as e:
+            raise ValueError(f"Invalid base64 payload: {e}")
+    else:
+        decoded = data_bytes
+
+    try:
+        decrypted = unpad(cipher.decrypt(decoded), AES.block_size)
+    except Exception as e:
+        raise ValueError(f"Decryption failed: {e}")
+
+    try:
+        return decrypted.decode("utf-8")
+    except Exception:
+        # Fallback: return as latin-1 to preserve bytes if UTF-8 is not valid
+        return decrypted.decode("latin-1")
+
+
+def encrypt_data(text: str) -> bytes:
+    key, iv = get_key_and_iv()
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    encrypted = cipher.encrypt(pad(text.encode("utf-8"), AES.block_size))
     return base64.b64encode(encrypted)
 
 
 def process_file(path):
-    """Process a file: decrypt if encrypted, encrypt if decrypted"""
     with open(path, "rb") as f:
         data = f.read()
-    
+
     if is_base64(data):
-        print("Decrypting file...")
+        print("Decrypting file")
         output = decrypt_data(data)
-        
-        # Always write decrypted data as binary first
-        output_path = path + ".decrypted" if path.endswith(".sav") else path
-        with open(output_path, "wb") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(output)
-        print(f"Successfully decrypted to: {output_path}")
-        
-        # Try to also save as readable JSON if it's valid UTF-8
-        try:
-            output_str = output.decode("utf-8")
-            json_path = path.replace(".sav", ".json") if path.endswith(".sav") else path + ".json"
-            with open(json_path, "w", encoding="utf-8") as f:
-                f.write(output_str)
-            print(f"Also saved as readable text: {json_path}")
-        except UnicodeDecodeError:
-            print("(Decrypted data is binary, not text)")
     else:
-        print("Encrypting file...")
-        output = encrypt_data(data)
-        with open(path, "wb") as f:
-            f.write(output)
-        print(f"Successfully encrypted: {path}")
-
-
-if __name__ == "__main__":
-    import sys
-    if len(sys.argv) < 2:
-        print("Usage: python AESencryption.py <file_path>")
-        sys.exit(1)
-    
-    file_path = sys.argv[1]
-    process_file(file_path)
+        print("Encrypting file")
+        # Attempt to decode as UTF-8, fallback to latin-1 to preserve bytes
+        try:
+            text = data.decode("utf-8")
+        except Exception:
+            text = data.decode("latin-1")
+        output = encrypt_data(text)
+        # write base64 string (text mode) to match Java FileWriter behavior
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(output.decode("ascii"))

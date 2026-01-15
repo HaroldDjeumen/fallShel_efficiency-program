@@ -6,7 +6,7 @@ import virtualvaultmap
 import placementCalc
 
 # ===== CONFIG =====
-VAULT_NAME = "vault2"
+VAULT_NAME = "vault1"
 RUN_INTERVAL = 60  # seconds
 
 if not VAULT_NAME:
