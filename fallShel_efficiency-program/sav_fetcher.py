@@ -130,7 +130,7 @@ def run(vault_name):
 
 
 if __name__ == "__main__":
-    import sys
+    import sys                 
     
     # Check if vault name is provided as argument
     if len(sys.argv) > 1:

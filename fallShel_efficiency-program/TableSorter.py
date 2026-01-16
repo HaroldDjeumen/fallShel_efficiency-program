@@ -178,3 +178,4 @@ def run(json_path):
     for outfit in set(outfit_list):
         print(f" - Outfit ID: {outfit}")
 
+    return outfit_list
