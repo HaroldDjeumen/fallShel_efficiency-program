@@ -1,4 +1,5 @@
-﻿from collections import defaultdict
+﻿from asyncio.windows_events import NULL
+from collections import defaultdict
 import os
 import time
 import json
@@ -6,7 +7,22 @@ import sqlite3
 from matplotlib import pyplot as plt
 import numpy as np
 
-def run(json_path, outfitlist, vault_name):
+def run(json_path, outfitlist, vault_name, optimizer_params=None):
+    
+    # ===== ADAPTIVE PARAMETERS (PUT THIS AT THE TOP) =====
+    if optimizer_params:
+        BALANCE_THRESHOLD = optimizer_params.get('BALANCE_THRESHOLD', 5.0)
+        MAX_PASSES = optimizer_params.get('MAX_PASSES', 10)
+        SWAP_AGGRESSIVENESS = optimizer_params.get('SWAP_AGGRESSIVENESS', 1.0)
+        MIN_STAT_THRESHOLD = optimizer_params.get('MIN_STAT_THRESHOLD', 5)
+        OUTFIT_STRATEGY = optimizer_params.get('OUTFIT_STRATEGY', 'deficit_first')
+    else:
+        # Defaults
+        BALANCE_THRESHOLD = 5.0
+        MAX_PASSES = 10
+        SWAP_AGGRESSIVENESS = 1.0
+        MIN_STAT_THRESHOLD = 5
+        OUTFIT_STRATEGY = 'deficit_first'
 
     # --- Config / constants ----------------------------------------------------
     conn = sqlite3.connect("vault.db")
@@ -328,6 +344,11 @@ def run(json_path, outfitlist, vault_name):
     caf_dwellers = extract_ids(bestCaf)
     wap_dwellers = extract_ids(bestWaP)
 
+    if MIN_STAT_THRESHOLD > 0:
+        geo_dwellers = [d for d in geo_dwellers if dweller_stats.get(d, {}).get('Strength', 0) >= MIN_STAT_THRESHOLD]
+        wap_dwellers = [d for d in wap_dwellers if dweller_stats.get(d, {}).get('Perception', 0) >= MIN_STAT_THRESHOLD]
+        caf_dwellers = [d for d in caf_dwellers if dweller_stats.get(d, {}).get('Agility', 0) >= MIN_STAT_THRESHOLD]
+
     sec_geo_dwellers = extract_ids(secbestGeo)
     sec_caf_dwellers = extract_ids(secbestCaf)
     sec_wap_dwellers = extract_ids(secbestWaP)
@@ -508,9 +529,8 @@ def run(json_path, outfitlist, vault_name):
         print(f"{room_key} | Time: {prod_time}s | {status}")
 
     # --- Auto-balancing (limited passes, efficient selection) -------------------
+    # --- Auto-balancing (limited passes, efficient selection) -------------------
     TRAINING_ROOMS = {"Armory", "Dojo", "Gym"}
-    BALANCE_THRESHOLD = 5.0
-    MAX_PASSES = 10
 
 
     def recalc_mean_finder():
@@ -536,17 +556,28 @@ def run(json_path, outfitlist, vault_name):
     for pass_num in range(1, MAX_PASSES + 1):
         recalc_mean_finder()
         geo_mean, wap_mean, caf_mean = group_means(mean_finder)
+    
         if not mean_finder:
             break
 
         def is_balanced_local():
             for r, t in mean_finder.items():
                 rtype, _, _ = parse_room(r)
-                target = geo_mean if rtype in ("Geothermal", "Energy2") else \
-                         wap_mean if rtype in ("WaterPlant", "Water2") else \
-                         caf_mean if rtype in ("Cafeteria", "Hydroponic") else None
-                if target is None:
+            
+                # Determine target
+                if rtype in ("Power", "Power2"):
+                    target = geo_mean
+                elif rtype in ("Water", "Water2"):
+                    target = wap_mean
+                elif rtype in ("Food", "Food2"):
+                    target = caf_mean
+                else:
                     continue
+            
+                # CRITICAL: Check for None before math operations
+                if target is None or t is None:
+                    continue
+                
                 if abs(t - target) > BALANCE_THRESHOLD:
                     return False
             return True
@@ -561,8 +592,10 @@ def run(json_path, outfitlist, vault_name):
             rooms = [r for r in mean_finder if r[0] in codes and r[0] not in TRAINING_ROOMS]
             if len(rooms) < 2:
                 continue
+            
             weakest = max(rooms, key=lambda r: mean_finder[r])
             strongest = min(rooms, key=lambda r: mean_finder[r])
+        
             if weakest == strongest:
                 continue
             if weakest[0] in TRAINING_ROOMS or strongest[0] in TRAINING_ROOMS:
@@ -586,22 +619,22 @@ def run(json_path, outfitlist, vault_name):
                 sortedL[weakest].append(mover)
                 print(f"Assigned {mover} → {weakest}")
 
-    # --- Print final mapping and compute times ---------------------------------
-    print("")
-    for room, dwellers in sortedL.items():
-        print(f"Room: {room} -> Dwellers: {', '.join(dwellers)}")
-    print("")
+        # --- Print final mapping and compute times ---------------------------------
+        print("")
+        for room, dwellers in sortedL.items():
+            print(f"Room: {room} -> Dwellers: {', '.join(dwellers)}")
+        print("")
 
-    recalc_mean_finder()
-    after_balancing_times = dict(mean_finder)
-    mean_finder.clear()
+        recalc_mean_finder()
+        after_balancing_times = dict(mean_finder)
+        mean_finder.clear()
 
-    print("\nFINAL TIMES AFTER BALANCING")
-    for room_key, dwellers in sortedL.items():
-        t = get_room_production_time(room_key, dwellers, dweller_stats, happiness=vault_happiness/100)
-        if t:
-            mean_finder[room_key] = t
-            print(f"{room_key} -> {t} seconds")
+        print("\nFINAL TIMES AFTER BALANCING")
+        for room_key, dwellers in sortedL.items():
+            t = get_room_production_time(room_key, dwellers, dweller_stats, happiness=vault_happiness/100)
+            if t:
+                mean_finder[room_key] = t
+                print(f"{room_key} -> {t} seconds")
 
 
     # --- Further Improvement by using outfit mods ------------------
@@ -677,8 +710,23 @@ def run(json_path, outfitlist, vault_name):
     sorted_rooms = sorted(room_needs.items(), key=lambda x: x[1]['deficit'], reverse=True)
 
     # Assign outfits to maximize impact
-    available_outfits = list(outfit_mods.keys())
+    from collections import Counter
 
+    # Remove outfits that were not found in the database
+    outfit_inventory = Counter(
+        oid for oid in outfitlist
+        if oid in outfit_mods
+    )
+    outfit_used = {oid: 0 for oid in outfit_inventory}
+
+    def outfit_available(outfit_id):
+        return outfit_used.get(outfit_id, 0) < outfit_inventory.get(outfit_id, 0)
+
+    def any_outfit_left():
+        return any(
+            outfit_used.get(oid, 0) < outfit_inventory.get(oid, 0)
+            for oid in outfit_inventory
+        )
     print("\n" + "-"*60)
     print("OUTFIT ASSIGNMENT STRATEGY - PHASE 1: BALANCING")
     print("-"*60)
@@ -698,16 +746,18 @@ def run(json_path, outfitlist, vault_name):
         outfit_stat_map = {'Strength': 's', 'Perception': 'p', 'Agility': 'a'}
         stat_key = outfit_stat_map.get(stat_needed)
     
-        if not stat_key or not available_outfits:
+        if not stat_key or not any_outfit_left():
             continue
-    
+
         # Sort available outfits by their bonus for the needed stat
         # Filter out outfits with 0 bonus for the needed stat
         relevant_outfits = [
-            oid for oid in available_outfits 
-            if outfit_mods[oid][stat_key] > 0
+            oid for oid in outfit_inventory
+            if oid in outfit_mods
+            and outfit_mods[oid][stat_key] > 0
+            and outfit_available(oid)
         ]
-    
+  
         if not relevant_outfits:
             print(f"  No outfits available with {stat_needed} bonus")
             continue
@@ -735,7 +785,8 @@ def run(json_path, outfitlist, vault_name):
         
             # Take the best available outfit
             outfit_id = best_outfits.pop(0)
-            available_outfits.remove(outfit_id)
+            outfit_used[outfit_id] += 1
+
         
             # Assign outfit to dweller
             outfit_assignments[dweller_id] = outfit_id
@@ -757,11 +808,16 @@ def run(json_path, outfitlist, vault_name):
             print(f"  No suitable outfits available")
 
     # PHASE 2: Assign remaining outfits to big rooms
-    if available_outfits:
+    if any_outfit_left():
         print("\n" + "-"*60)
         print("OUTFIT ASSIGNMENT STRATEGY - PHASE 2: BIG ROOMS")
         print("-"*60)
-        print(f"\n{len(available_outfits)} outfits remaining - assigning to largest rooms")
+        remaining_count = sum(
+            outfit_inventory[oid] - outfit_used.get(oid, 0)
+            for oid in outfit_inventory
+        )
+        print(f"\n{remaining_count} outfits remaining - assigning to largest rooms")
+
     
         # Get production rooms sorted by size (largest first)
         production_rooms = [
@@ -777,9 +833,9 @@ def run(json_path, outfitlist, vault_name):
         )
     
         for room_key, need_data in production_rooms:
-            if not available_outfits:
+            if not any_outfit_left():
                 break
-        
+ 
             stat_needed = need_data['stat']
             dwellers = need_data['dwellers']
             size = need_data['size']
@@ -803,18 +859,21 @@ def run(json_path, outfitlist, vault_name):
         
             # Assign best remaining outfits to these dwellers
             for dweller_id in unequipped_dwellers:
-                if not available_outfits:
+                if not any_outfit_left():
                     break
             
                 # Find best outfit for this room's stat from remaining outfits
                 best_outfit = max(
-                    available_outfits,
+                    (
+                        oid for oid in outfit_inventory
+                        if oid in outfit_mods and outfit_available(oid)
+                    ),
                     key=lambda oid: outfit_mods[oid][stat_key]
                 )
-            
+     
                 # Assign the outfit
                 outfit_assignments[dweller_id] = best_outfit
-                available_outfits.remove(best_outfit)
+                outfit_used[best_outfit] += 1
             
                 # Apply outfit mods
                 dweller_stats_with_outfits[dweller_id]['Strength'] += outfit_mods[best_outfit]['s']
@@ -857,7 +916,12 @@ def run(json_path, outfitlist, vault_name):
     print("OUTFIT ASSIGNMENT SUMMARY")
     print(f"{'='*60}")
     print(f"Total outfits assigned: {len(outfit_assignments)}")
-    print(f"Remaining unassigned outfits: {len(available_outfits)}")
+    remaining = sum(
+        outfit_inventory[oid] - outfit_used.get(oid, 0)
+        for oid in outfit_inventory
+    )
+    print(f"Remaining unassigned outfits: {remaining}")
+
 
     if outfit_assignments:
         print("\nAssigned Outfits by Room:")
@@ -873,11 +937,18 @@ def run(json_path, outfitlist, vault_name):
     else:
         print("No outfits were assigned (all rooms already balanced)")
 
-    if available_outfits:
-        print(f"\nUnassigned outfits ({len(available_outfits)}):")
-        for outfit_id in available_outfits:
-            outfit = outfit_mods[outfit_id]
-            print(f"  {outfit['name']} (S+{outfit['s']}, P+{outfit['p']}, A+{outfit['a']})")
+    remaining = {
+        oid: outfit_inventory[oid] - outfit_used.get(oid, 0)
+        for oid in outfit_inventory
+        if outfit_inventory[oid] - outfit_used.get(oid, 0) > 0
+    }
+
+    if remaining:
+        print(f"\nUnassigned outfits ({sum(remaining.values())}):")
+        for oid, count in remaining.items():
+            outfit = outfit_mods[oid]
+            for _ in range(count):
+                print(f"  {outfit['name']} (S+{outfit['s']}, P+{outfit['p']}, A+{outfit['a']})")
 
     # --- Prepare arrays for plotting (exclude training rooms) ------------------
     exclude = {"Gym", "Armory", "Dojo"}
@@ -885,7 +956,7 @@ def run(json_path, outfitlist, vault_name):
 
     initial_times = {r: initial_mean_finder.get(r) for r in rooms}
     before_times = {r: before_balancing_times.get(r) for r in rooms}
-    after_times = {r: after_balancing_times.get(r) for r in rooms}
+    after_times = {r: mean_finder.get(r) for r in rooms}
     outfit_times = {r: mean_finder_with_outfits.get(r) for r in rooms}
 
     initial = [np.nan if initial_times.get(r) is None else initial_times[r] for r in rooms]
@@ -930,7 +1001,7 @@ def run(json_path, outfitlist, vault_name):
 
     initial_overall = calculate_overall_average(initial_mean_finder)
     before_balance_overall = calculate_overall_average(before_balancing_times)
-    after_balance_overall = calculate_overall_average(after_balancing_times)
+    after_balance_overall = calculate_overall_average(mean_finder)
     with_outfits_overall = calculate_overall_average(mean_finder_with_outfits)
 
     # Track performance (records data)
@@ -943,6 +1014,3 @@ def run(json_path, outfitlist, vault_name):
     )
 
     conn.close()
-
-    
-

@@ -5,10 +5,11 @@ import TableSorter
 import virtualvaultmap
 import placementCalc
 from VaultPerformanceTracker import VaultPerformanceTracker
+from AdaptiveVaultOptimizer import AdaptiveVaultOptimizer
 
 # ===== CONFIG =====
 RUN_INTERVAL = 60  # seconds
-
+AUTO_OPTIMIZE = True  # Set to True to auto-apply adjustments
 
 def get_vault_name():
     """Prompt user for vault number and return vault name"""
@@ -22,11 +23,11 @@ def get_vault_name():
         print("Invalid input. Please enter a vault number.")
 
 
-def run_cycle(vault_name, outfitlist):
+def run_cycle(vault_name, outfitlist,optimizer_params):
     json_path = sav_fetcher.run(vault_name)
     outfitlist = TableSorter.run(json_path)
     virtualvaultmap.run(json_path)
-    placementCalc.run(json_path, outfitlist, vault_name)
+    placementCalc.run(json_path, outfitlist, vault_name, optimizer_params)
 
 
 if __name__ == "__main__":
@@ -37,11 +38,15 @@ if __name__ == "__main__":
     while True:  # Outer loop for vault selection
         VAULT_NAME = get_vault_name()
         
+        # Initialize adaptive optimizer
+        optimizer = AdaptiveVaultOptimizer(VAULT_NAME)
+        
         # Get outfit list
         OUTFIT_LIST = []  # TODO: Load this from your data
         
         print(f"\nStarting analysis for {VAULT_NAME}")
         print(f"Running analysis every {RUN_INTERVAL} seconds...")
+        print("Adaptive optimization: ENABLED")
         print("Press Ctrl+C to stop and view performance timeline")
         print("=" * 60)
         
@@ -58,12 +63,22 @@ if __name__ == "__main__":
                 print(f"Uptime: {int(time.time() - start_time)} seconds")
                 print("-" * 60)
                 
-                run_cycle(VAULT_NAME, OUTFIT_LIST)
+                # Get adaptive parameters
+                optimizer_params = optimizer.get_optimization_params()
+
+                run_cycle(VAULT_NAME, OUTFIT_LIST, optimizer_params)
                 
                 cycle_duration = time.time() - cycle_start
                 print(f"✓ Cycle #{cycle_count} completed in {cycle_duration:.2f} seconds")
-                print(f"Waiting {RUN_INTERVAL} seconds until next cycle...")
+
+                # Every 5 cycles, analyze and potentially adjust
+                if cycle_count % 5 == 0 and cycle_count >= 10:
+                    print("\n" + "~"*60)
+                    print("Running adaptive analysis...")
+                    optimizer.apply_adjustments(auto_apply=AUTO_OPTIMIZE)
+                    print("~"*60)
                 
+                print(f"Waiting {RUN_INTERVAL} seconds until next cycle...")
                 time.sleep(RUN_INTERVAL)
                 
             except KeyboardInterrupt:
@@ -96,6 +111,12 @@ if __name__ == "__main__":
                 except Exception as e:
                     print(f"Error generating timeline: {e}")
                 
+                # Generate final analysis
+                print("\n" + "="*60)
+                print("FINAL ADAPTIVE ANALYSIS")
+                print("="*60)
+                optimizer.generate_recommendation_report()
+
                 vault_found = False  # Exit inner loop, return to vault selection
                 
             except FileNotFoundError as e:

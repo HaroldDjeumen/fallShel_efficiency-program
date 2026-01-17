@@ -11,7 +11,6 @@ class VaultPerformanceTracker:
         self.history = self._load_history()
     
     def _load_history(self):
-        """Load existing performance history from file"""
         if os.path.exists(self.data_file):
             try:
                 with open(self.data_file, 'r') as f:

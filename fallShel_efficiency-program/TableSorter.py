@@ -7,6 +7,21 @@ from typing import Collection
 import pyodbc
 
 
+def print_section(title, char="="):
+    """Print a formatted section header"""
+    width = 80
+    print(f"\n{char * width}")
+    print(f"{title.center(width)}")
+    print(f"{char * width}\n")
+
+
+def print_subsection(title):
+    """Print a formatted subsection header"""
+    print(f"\n{'-' * 80}")
+    print(f"  {title}")
+    print(f"{'-' * 80}")
+
+
 def run(json_path):
     conn = sqlite3.connect("vault.db")
     cursor = conn.cursor()
@@ -16,37 +31,50 @@ def run(json_path):
     jCounter = 0
 
     SPECIAL = ["Luck", "Strength", "Perception", "Intelligence", "Chrisma", "Endurance", "Agility"]
-    delcount =0
-    dwellercount =0
+    delcount = 0
+    dwellercount = 0
 
     downloads_folder = os.path.expanduser(r"~\Downloads")
     file_path = os.path.join(downloads_folder, json_path) 
 
+    print_section("VAULT DATA PROCESSOR")
+    print(f"Loading vault data from: {file_path}")
+
     # Open and read the JSON file
     with open(file_path, "r", encoding="utf-8") as file:
         data = json.load(file)
-
 
     dwellers_list = data["dwellers"]["dwellers"]
     rooms = data["vault"]["rooms"]
     storItems = data["vault"]["inventory"]["items"]
     outfit_list = []
 
+    print(f"✓ Loaded {len(dwellers_list)} dwellers, {len(rooms)} rooms, {len(storItems)} storage items")
 
+    # Clean up deleted dwellers
+    print_subsection("Database Cleanup")
     json_ids = {d["serializeId"] for d in dwellers_list}
     cursor.execute("SELECT dweller_id FROM dwellers")
     db_ids = {row[0] for row in cursor.fetchall()}
     ids_to_delete = db_ids - json_ids
+    
     for bad_id in ids_to_delete:
         cursor.execute("DELETE FROM Stats WHERE dweller_id = ?", (bad_id,))
         cursor.execute("DELETE FROM dwellers WHERE dweller_id = ?", (bad_id,))
-        delcount = delcount +1
+        delcount += 1
     conn.commit()
+    
+    if delcount > 0:
+        print(f"✓ Removed {delcount} deleted dweller(s) from database")
+    else:
+        print("✓ No cleanup needed - all dwellers current")
 
-    tables = ["Stats","TrainingRoom","CraftingRoom","ConsumableRoom","Non_ProductionRoom","ProductionRoom"]
+    # Clear working tables
+    tables = ["Stats", "TrainingRoom", "CraftingRoom", "ConsumableRoom", "Non_ProductionRoom", "ProductionRoom"]
     for t in tables:
         cursor.execute(f"DELETE FROM {t}")
     conn.commit()
+    print(f"✓ Cleared {len(tables)} working tables")
 
     table_map = {
         "Production": "ProductionRoom",
@@ -55,67 +83,82 @@ def run(json_path):
         "Training": "TrainingRoom"
     }
 
-    for d in dwellers_list:
+    # Process dwellers
+    print_section("PROCESSING DWELLERS")
+    
+    for idx, d in enumerate(dwellers_list, 1):
         fullname = d.get("name", "") + " " + d.get("lastName", "")
         serialize_id = d.get("serializeId")
         outfit = d.get("equipedOutfit", {})
         outfitId = outfit.get("id")
-        h =  d.get("health", {})
+        h = d.get("health", {})
         health = h.get("healthValue")
         maxhealth = h.get("maxHealth")
-        exp =  d.get("experience", {})
+        exp = d.get("experience", {})
         lvl = exp.get("currentLevel")
         stats_container = d.get("stats", {})
         weapon = d.get("equipedWeapon", {})
-        outfit = d.get("equipedOutfit", {})
 
+        print(f"\n[{idx}/{len(dwellers_list)}] {fullname}")
+        print(f"  ID: {serialize_id}")
+        print(f"  Health: {health}/{maxhealth} | Level: {lvl} | Outfit: {outfitId}")
 
+        # Process SPECIAL stats
         stat_list = stats_container["stats"]
+        special_display = []
         for i, special_name in enumerate(SPECIAL):
             stats_value = stat_list[i]["value"]
             mods_value = stat_list[i]["mod"]
             exps_value = stat_list[i]["exp"]
-            print(f"{fullname}(Health: {health}/{maxhealth}, Current level = {lvl}) - (is wearing {outfitId}) - {serialize_id}, {special_name}: {stats_value} - mod = {mods_value}(exps:{exps_value})")
-        
+            
+            # Format SPECIAL stat display
+            stat_display = f"{special_name[0]}: {stats_value}"
+            if mods_value != 0:
+                stat_display += f"(+{mods_value})"
+            special_display.append(stat_display)
+            
             cursor.execute("""
                INSERT OR REPLACE INTO Stats
               (dweller_id, StatName, Value, Mod, Exp)
               VALUES (?, ?, ?, ?, ?)
               """, (serialize_id, special_name, stats_value, mods_value, exps_value))
+        
+        print(f"  SPECIAL: {' | '.join(special_display)}")
 
-    
+        # Find dweller's room assignment
+        current_room = None
         for room in rooms:
             for dweller_id in room.get("dwellers", []):
                 if serialize_id == dweller_id:
-                    fullname_with_room = f"{fullname} is working at the {room.get('type')}"
-                    print(fullname_with_room)
-
+                    current_room = room.get('type')
+                    print(f"  Assignment: {current_room}")
+                    
                     cursor.execute("""
                     INSERT OR REPLACE INTO dwellers
                     (dweller_id, Fullname, CurrentHealth, MaxHealth, [Level], Outfit, CurrentRoom)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """, (serialize_id, fullname, health, maxhealth, lvl, outfitId, room.get('type')))
+                    """, (serialize_id, fullname, health, maxhealth, lvl, outfitId, current_room))
                     break
-    
-        weaponId = weapon.get("id")
-        isAssigned = weapon.get("hasBeenAssigned")
-        print(f" - Weapon in use: {weaponId}")
+            if current_room:
+                break
+        
+        if not current_room:
+            print(f"  Assignment: Not assigned to any room")
 
-        outfitId = outfit.get("id")
-        isAssigned = outfit.get("hasBeenAssigned")
-        print(f" - Outfit in use: {outfitId}")
-        outfit_list.append(outfitId)
-       
-        print("Dweller Outfit")
-        print(f" {fullname} - Outfit ID: {outfitId}")
+        # Track weapon and outfit
+        weaponId = weapon.get("id")
+        print(f"  Weapon: {weaponId if weaponId else 'None'}")
+        
+        if outfitId:
+            outfit_list.append(outfitId)
 
         conn.commit()
-        cursor.execute("SELECT * FROM Stats WHERE dweller_id = ?", (serialize_id,))
-        print(cursor.fetchall())
-        print("Saved:", fullname, "ID:", serialize_id)
-        dwellercount = dwellercount +1
+        dwellercount += 1
 
-
+    # Process rooms
+    print_section("PROCESSING ROOMS")
+    
+    room_types = {}
     for roominfo in rooms:
         names = [] 
         dwellerid = []
@@ -127,18 +170,31 @@ def run(json_path):
         Roomlevel = roominfo.get("level")
         MergeLevel = roominfo.get("mergeLevel")
 
-        print(f"Room {Roomtype} (Class: {Class}) at ({Row},{Column}) - Room Level: {Roomlevel}, Merge Level: {MergeLevel}, ID: {DeserializedID}")
+        # Track room types for summary
+        room_types[Roomtype] = room_types.get(Roomtype, 0) + 1
 
+        # Determine room size based on merge level
+        size_map = {0: "Small", 1: "Medium", 2: "Large"}
+        size = size_map.get(MergeLevel, "Unknown")
+
+        print(f"\n{Roomtype} ({Class})")
+        print(f"  Location: Row {Row}, Col {Column}")
+        print(f"  Level: {Roomlevel} | Size: {size} (Merge {MergeLevel})")
+
+        # Get dwellers in room
         for dweller_id in roominfo.get("dwellers", []):
             cursor.execute("SELECT Fullname FROM dwellers WHERE dweller_id = ?", (dweller_id,))
             row = cursor.fetchone()
             if row and row[0] is not None:
                 names.append(row[0])
                 dwellerid.append(dweller_id)
-                print(" - Dweller:", row[0])
             else:
                 names.append(f"ID {dweller_id} (missing)")
-                print(" - Dweller: ID", dweller_id, "(missing)")
+
+        if names:
+            print(f"  Dwellers ({len(names)}): {', '.join(names)}")
+        else:
+            print(f"  Dwellers: None")
 
         table_name = table_map.get(roominfo.get("class"), "Non_ProductionRoom")
 
@@ -148,34 +204,55 @@ def run(json_path):
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
-        DeserializedID, Roomtype, Class, Row, Column,
-        Roomlevel, MergeLevel, ", ".join(names), ", ".join(map(str, dwellerid))
+            DeserializedID, Roomtype, Class, Row, Column,
+            Roomlevel, MergeLevel, ", ".join(names), ", ".join(map(str, dwellerid))
         )
 
         cursor.execute(sql, params)
         conn.commit()
 
-        result = ", ".join(names)
-        print(f"{result} + {dwellerid}")
-    conn.close()
-
-    for item in storItems:
+    # Process storage items
+    print_section("PROCESSING STORAGE")
     
+    for item in storItems:
         itemId = item.get("id")
         itemType = item.get("type")
         isAssigned = item.get("hasBeenAssigned")
-
    
         if itemType == "Outfit":
-            oCounter = oCounter + 1 
+            oCounter += 1 
             outfit_list.append(itemId)
     
-        
-    print(f"Total Weapons: {wCounter}, Total Outfits: {oCounter}, Total Junk: {jCounter}")               
-    print(f"{delcount} dweller IDs was deleted")
-    print(f"{dwellercount} dwellers was processed")
-    print("Outfits in use or in storage:")
-    for outfit in set(outfit_list):
-        print(f" - Outfit ID: {outfit}")
+    print(f"Storage Items Summary:")
+    print(f"  Weapons: {wCounter}")
+    print(f"  Outfits: {oCounter}")
+    print(f"  Junk: {jCounter}")
 
+    # Final summary
+    print_section("PROCESSING COMPLETE")
+    
+    print(f"Summary:")
+    print(f"  ✓ Processed {dwellercount} dwellers")
+    print(f"  ✓ Processed {len(rooms)} rooms")
+    if delcount > 0:
+        print(f"  ✓ Cleaned up {delcount} deleted dweller(s)")
+    
+    print(f"\nRoom Distribution:")
+    for room_type, count in sorted(room_types.items()):
+        print(f"  {room_type}: {count}")
+
+    print(f"\nOutfit Tracking:")
+    unique_outfits = set(outfit_list)
+    print(f"  Total outfits (equipped + storage): {len(outfit_list)}")
+    print(f"  Unique outfit types: {len(unique_outfits)}")
+    
+    if unique_outfits:
+        print(f"\n  Outfit IDs in use:")
+        for outfit in sorted(unique_outfits):
+            count = outfit_list.count(outfit)
+            print(f"    {outfit}: {count}x")
+
+    conn.close()
+    print(f"\n{'=' * 80}\n")
+    
     return outfit_list

@@ -21,6 +21,7 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="AdaptiveVaultOptimizer.py" />
     <Compile Include="fallShel_efficiency_program.py" />
     <Compile Include="placementCalc.py" />
     <Compile Include="VaultPerformanceTracker.py" />
