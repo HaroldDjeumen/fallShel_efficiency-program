@@ -20,9 +20,9 @@ class AdaptiveVaultOptimizer:
         """Load optimizer configuration with adaptive parameters"""
         default_config = {
             'balance_threshold': 5.0,  # How close rooms need to be to target
-            'max_balance_passes': 10,
+            'max_balance_passes': 10, # Goes up to 25
             'outfit_strategy': 'deficit_first',  # or 'big_rooms_first'
-            'swap_aggressiveness': 1.0,  # How willing to swap dwellers (0.5-2.0)
+            'swap_aggressiveness': 1.0,  # How willing to swap dwellers (0.5-5.0)
             'min_stat_threshold': 5,  # Min stat value to consider dweller for room
             'learning_rate': 0.1,  # How fast to adjust parameters
             'performance_window': 10,  # Number of cycles to analyze
@@ -116,7 +116,7 @@ class AdaptiveVaultOptimizer:
             suggestions['reasoning'].append("Need more aggressive optimization")
             
             # Increase swap aggressiveness
-            new_aggression = min(2.0, self.config['swap_aggressiveness'] * 1.2)
+            new_aggression = min(5.0, self.config['swap_aggressiveness'] * 1.2)
             suggestions['adjustments']['swap_aggressiveness'] = new_aggression
             
             # Tighten balance threshold
@@ -124,7 +124,7 @@ class AdaptiveVaultOptimizer:
             suggestions['adjustments']['balance_threshold'] = new_threshold
             
             # More balance passes
-            new_passes = min(20, self.config['max_balance_passes'] + 3)
+            new_passes = min(25, self.config['max_balance_passes'] + 3)
             suggestions['adjustments']['max_balance_passes'] = new_passes
         
         # Issue 2: Before/After balance not improving over initial

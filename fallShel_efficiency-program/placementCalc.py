@@ -6,10 +6,22 @@ import json
 import sqlite3
 from matplotlib import pyplot as plt
 import numpy as np
+from datetime import datetime
 
 def run(json_path, outfitlist, vault_name, optimizer_params=None):
+    def print_section(title, char="=", width=100):
+        """Print a formatted section header"""
+        print(f"\n{char * width}")
+        print(f"{title.center(width)}")
+        print(f"{char * width}\n")
+
+    def print_subsection(title, width=100):
+        """Print a formatted subsection header"""
+        print(f"\n{'-' * width}")
+        print(f"  {title}")
+        print(f"{'-' * width}")
     
-    # ===== ADAPTIVE PARAMETERS (PUT THIS AT THE TOP) =====
+    # ===== ADAPTIVE PARAMETERS =====
     if optimizer_params:
         BALANCE_THRESHOLD = optimizer_params.get('BALANCE_THRESHOLD', 5.0)
         MAX_PASSES = optimizer_params.get('MAX_PASSES', 10)
@@ -17,7 +29,6 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
         MIN_STAT_THRESHOLD = optimizer_params.get('MIN_STAT_THRESHOLD', 5)
         OUTFIT_STRATEGY = optimizer_params.get('OUTFIT_STRATEGY', 'deficit_first')
     else:
-        # Defaults
         BALANCE_THRESHOLD = 5.0
         MAX_PASSES = 10
         SWAP_AGGRESSIVENESS = 1.0
@@ -74,7 +85,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
     ROOM_CAPACITY = {"size3": 2, "size6": 4, "size9": 6}
 
     # --- Storage ---------------------------------------------------------------
-    initial_rooms = {}  # mapping room_key tuple -> list of dweller ids (strings)
+    initial_rooms = {}
     _room_counts = defaultdict(int)
 
     # --- Load production rooms -------------------------------------------------
@@ -83,10 +94,8 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
     )
     production_rooms = cursor.fetchall()
 
-
     def _lvl_str(room_level: int) -> str:
         return f"lvl{room_level if room_level in (1, 2) else 3}"
-
 
     def _size_str(merge_level: int) -> str:
         if merge_level == 1:
@@ -94,7 +103,6 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
         if merge_level == 2:
             return "size6"
         return "size9"
-
 
     for dweller_ids, room_name, row, column, room_l, merge_l in production_rooms:
         if room_name not in ROOM_STAT_MAP:
@@ -183,6 +191,13 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
     except Exception as e:
         print(f"An error occurred: {e}")
 
+    total_rooms = len(geothermal) + len(waterPlant) + len(cafeteria)
+    is_small_vault = total_rooms < 10
+
+    if is_small_vault:
+        print("\n🏠 Small vault detected - using conservative optimization")
+        BALANCE_THRESHOLD = 10.0  
+        MAX_PASSES = 5  
 
     # --- Normalize room lists: remove repeated tiles after merged rooms -------
     def compact_room_list(lst):
@@ -199,9 +214,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
                 i += 3
         return out
 
-
     RoomLists = [compact_room_list(geothermal), compact_room_list(waterPlant), compact_room_list(cafeteria)]
-
 
     def number_duplicates(lst):
         counts = defaultdict(int)
@@ -212,7 +225,6 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
             out.append((base[0], base[1], base[2], str(counts[base])))
         return out
 
-
     geothermal = number_duplicates(RoomLists[0])
     waterPlant = number_duplicates(RoomLists[1])
     cafeteria = number_duplicates(RoomLists[2])
@@ -221,7 +233,6 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
     Stats = {}
     dweller_stats = {}
     dweller_stats_initial = {}
-    mod_list = {}
     numDwellers = 0
     total_happiness = 0
 
@@ -238,7 +249,6 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
         allStats = cursor.fetchall()
         Stats[serialize_id] = allStats
 
-        # storing the stat of each dweller
         stat_map_initial = {statname: value + mode for _dwid, statname, value, mode in allStats}
         stat_map = {statname: value for _dwid, statname, value, mode in allStats}
         dweller_stats[str(serialize_id)] = stat_map
@@ -298,7 +308,6 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
         elif lowest_stat == "Agility":
             worstCaf.append(f"{serialize_id} - {lowest_val}")
 
-
     # sort lists
     bestGeo.sort(key=lambda s: int(s.split(" - ")[1]), reverse=True)
     bestWaP.sort(key=lambda s: int(s.split(" - ")[1]), reverse=True)
@@ -314,18 +323,14 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
     def extract_ids(data):
         return [x.split(" - ")[0].strip() for x in data]
 
-
     def get_unassignedID(*lists):
         return [item for sub in lists for item in sub]
-
 
     def get_unassigned_stat(stats_list, allowed_ids):
         allowed = set(allowed_ids)
         stats_list[:] = [s for s in stats_list if s.split(" - ")[0].strip() in allowed]
 
-
     sortedL = defaultdict(list)
-
 
     def assign_rooms(rooms, dwellers):
         size_map = {"size9": 6, "size6": 4, "size3": 2}
@@ -339,7 +344,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
                 del dwellers[:take]
                 sortedL[room].extend(to_assign)
 
-    # --- Assign dwellers to production rooms (three rounds) --------------------
+    # --- Assign dwellers to production rooms -----------------------------------
     geo_dwellers = extract_ids(bestGeo)
     caf_dwellers = extract_ids(bestCaf)
     wap_dwellers = extract_ids(bestWaP)
@@ -357,12 +362,30 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
     thi_caf_dwellers = extract_ids(worstCaf)
     thi_wap_dwellers = extract_ids(worstWaP)
 
-    # Round 1
-    assign_rooms(geothermal, geo_dwellers)
-    assign_rooms(waterPlant, wap_dwellers)
-    assign_rooms(cafeteria, caf_dwellers)
+    # Room priority scoring
+    def room_priority_score(room_tuple):
+        level_scores = {'lvl3': 3, 'lvl2': 2, 'lvl1': 1}
+        size_scores = {'size9': 9, 'size6': 6, 'size3': 3}
+        level = level_scores.get(room_tuple[1], 1)
+        size = size_scores.get(room_tuple[2], 1)
+        level_weight = 2.1 ** (level - 1)
+        return level_weight * size
 
-    # Round 2 (second best)
+    geothermal_sorted = sorted(geothermal, key=room_priority_score, reverse=True)
+    waterPlant_sorted = sorted(waterPlant, key=room_priority_score, reverse=True)
+    cafeteria_sorted = sorted(cafeteria, key=room_priority_score, reverse=True)
+
+    print("\n🎯 ROOM ASSIGNMENT PRIORITY ORDER:")
+    print(f"Power rooms: {[f'{r[0]} {r[1]} {r[2]}' for r in geothermal_sorted]}")
+    print(f"Water rooms: {[f'{r[0]} {r[1]} {r[2]}' for r in waterPlant_sorted]}")
+    print(f"Food rooms: {[f'{r[0]} {r[1]} {r[2]}' for r in cafeteria_sorted]}")
+
+    # Round 1
+    assign_rooms(geothermal_sorted, geo_dwellers)
+    assign_rooms(waterPlant_sorted, wap_dwellers)
+    assign_rooms(cafeteria_sorted, caf_dwellers)
+
+    # Round 2
     secRdwellers = get_unassignedID(sec_geo_dwellers, sec_caf_dwellers, sec_wap_dwellers)
     get_unassigned_stat(secbestGeo, secRdwellers)
     get_unassigned_stat(secbestCaf, secRdwellers)
@@ -371,7 +394,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
     assign_rooms(waterPlant, sec_wap_dwellers)
     assign_rooms(cafeteria, sec_caf_dwellers)
 
-    # Round 3 (third / worst)
+    # Round 3
     thiRdwellers = get_unassignedID(thi_geo_dwellers, thi_caf_dwellers, thi_wap_dwellers)
     get_unassigned_stat(worstGeo, thiRdwellers)
     get_unassigned_stat(worstCaf, thiRdwellers)
@@ -380,7 +403,6 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
     assign_rooms(waterPlant, thi_wap_dwellers)
     assign_rooms(cafeteria, thi_caf_dwellers)
 
-    # Left-over
     leftOver = get_unassignedID(thi_geo_dwellers, thi_caf_dwellers, thi_wap_dwellers)
 
     print("")
@@ -400,7 +422,6 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
     assign_rooms(dojo, extract_ids(worstCaf))
     assign_rooms(armory, extract_ids(worstWaP))
 
-    # second round training
     get_unassigned_stat(secbestGeo, leftOver)
     get_unassigned_stat(secbestCaf, leftOver)
     get_unassigned_stat(secbestWaP, leftOver)
@@ -412,7 +433,6 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
     assign_rooms(dojo, extract_ids(secbestCaf))
     assign_rooms(armory, extract_ids(secbestWaP))
 
-    # third round training
     get_unassigned_stat(bestGeo, leftOver)
     get_unassigned_stat(bestCaf, leftOver)
     get_unassigned_stat(bestWaP, leftOver)
@@ -440,45 +460,78 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
     print(", ".join(finalRemaining))
 
     # --- Production time helpers -----------------------------------------------
+    TRAINING_ROOMS = {"Armory", "Dojo", "Gym"}
+
     def parse_room(room_key):
         code = room_key[0]
         size = room_key[2]
         room_type, stat = ROOM_CODE_MAP.get(code, (None, None))
         return room_type, stat, size
 
+    def calculate_modifier(merge_size, tier):
+        R = merge_size
+        merge_factor = 2.1 ** (R - 1)
+        stat_factor = 0.9 + (0.1 * tier)
+        modifier = merge_factor * stat_factor
+        value = int(modifier * 10) / 10
+        return value
 
     def get_room_production_time(room_key, dwellers, dweller_stats, happiness=1.0):
         room_type, stat, size = parse_room(room_key)
         if room_type is None or not dwellers:
             return None
-        pool = BASE_POOL[room_type] * SIZE_MULTIPLIER[size]
 
+        room_name = room_key[0]
+        level_str = room_key[1]
+        room_tier = int(level_str.replace("lvl", ""))
+        if room_tier == 3:
+            tier = 6
+        elif room_tier == 2:
+            tier = 3
+        else:
+            tier = 1
 
+        size_str = room_key[2]
+        if size_str == "size3":
+            merge_size = 1 
+        elif size_str == "size6":
+            merge_size = 2  
+        elif size_str == "size9":
+            merge_size = 3  
+
+        pool = BASE_POOL[room_type] * SIZE_MULTIPLIER[size_str]
         total_stat = sum(dweller_stats.get(d, {}).get(stat, 0) for d in dwellers)
+
         if total_stat == 0:
             return None
-        return round(pool / (total_stat * happiness), 1)
 
+        modifier = calculate_modifier(merge_size, tier)
 
-    initial_mean_finder = {}
-    mean_finder = {}
+        production_time = 0
+        pool_percentage = (pool * (modifier/100)) 
+        if room_name in ("Cafeteria"):
+            production_time = ((pool - pool_percentage) / ((total_stat * happiness) + modifier))- total_stat
+        elif room_name in ("WaterPlant"):
+            production_time = ((pool - pool_percentage) / (total_stat * happiness))- (4 * total_stat)
+        elif room_name in ("Geothermal"):
+            production_time = ((pool - pool_percentage) / (total_stat * happiness))- total_stat
 
-    print("\nTIME BEFORE ANY CHANGES")
-    for room_key, dwellers in initial_rooms.items():
-        t = get_room_production_time(room_key, dwellers, dweller_stats_initial, happiness=vault_happiness/100)
-        if t:
-            initial_mean_finder[room_key] = t
-            print(f"{room_key} -> {t} seconds")
+        return round(production_time, 1)
 
-    print("\nTIME")
-    for room_key, dwellers in sortedL.items():
-        t = get_room_production_time(room_key, dwellers, dweller_stats, happiness=vault_happiness/100)
-        if t:
-            mean_finder[room_key] = t
-            print(f"{room_key} -> {t} seconds")
+    def recalc_mean_finder(stats_dict):
+        """Recalculate mean_finder with current sortedL assignments"""
+        result = {}
+        for room_key, dwellers in sortedL.items():
+            t = get_room_production_time(room_key, dwellers, stats_dict, happiness=vault_happiness / 100)
+            if t:
+                result[room_key] = t
+        return result
 
+    def calculate_overall_average(mean_map):
+        """Calculate overall average across all production rooms"""
+        times = [t for r, t in mean_map.items() if r[0] not in {"Gym", "Armory", "Dojo"}]
+        return round(sum(times) / len(times), 2) if times else 0
 
-    # --- Compute group means once (safety guards) -------------------------------
     def group_means(mean_map):
         geo = [t for r, t in mean_map.items() if r[0] in ("Geothermal", "Energy2")]
         wap = [t for r, t in mean_map.items() if r[0] in ("WaterPlant", "Water2")]
@@ -489,8 +542,42 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
             (sum(caf) / len(caf)) if caf else None,
         )
 
+    # --- Calculate initial times ---
+    print("\nTIME BEFORE ANY CHANGES (INITIAL STATE)")
+    initial_mean_finder = recalc_mean_finder(dweller_stats_initial)
+    
+    for room_key, t in initial_mean_finder.items():
+        level_str = room_key[1]
+        room_tier = int(level_str.replace("lvl", ""))
+        if room_tier == 3:
+            tier = 6
+        elif room_tier == 2:
+            tier = 3
+        else:
+            tier = 1
 
-    geo_mean, wap_mean, caf_mean = group_means(mean_finder)
+        size_str = room_key[2]
+        if size_str == "size3":
+            merge_size = 1
+        elif size_str == "size6":
+            merge_size = 2
+        else:
+            merge_size = 3
+        
+        room_type, stat, size = parse_room(room_key)
+        dwellers = sortedL[room_key]
+        total_stat = sum(dweller_stats_initial.get(d, {}).get(stat, 0) for d in dwellers)
+        modifier = calculate_modifier(merge_size, tier)
+    
+        print(f"{room_key} -> {t}s (Tier:{tier}, Merge:{merge_size}x, Mod:{round(modifier, 2)}, {stat}:{total_stat})")
+
+    print("\nTIME AFTER INITIAL ASSIGNMENT (BEFORE BALANCING)")
+    before_balancing_times = recalc_mean_finder(dweller_stats)
+    
+    for room_key, t in before_balancing_times.items():
+        print(f"{room_key} -> {t} seconds")
+
+    geo_mean, wap_mean, caf_mean = group_means(before_balancing_times)
 
     if geo_mean is not None:
         print(f"\nGeothermal Average Time: {round(geo_mean,1)} seconds")
@@ -499,72 +586,40 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
     if caf_mean is not None:
         print(f"Cafeteria Average Time: {round(caf_mean,1)} seconds")
 
-    # --- STAT ADJUSTMENT SUGGESTIONS -------------------------------------------
-    print("\nSTAT ADJUSTMENT SUGGESTIONS")
-    for room_key, prod_time in mean_finder.items():
-        room_type, stat, size = parse_room(room_key)
-        if room_type is None:
-            continue
-        if room_type == "Power":
-            target = geo_mean
-        elif room_type == "Water":
-            target = wap_mean
-        elif room_type == "Food":
-            target = caf_mean
-        else:
-            continue
-        pool = BASE_POOL[room_type] * SIZE_MULTIPLIER[size]
-        dwellers = sortedL[room_key]
-        current_total = sum(dweller_stats.get(d, {}).get(stat, 0) for d in dwellers)
-        if not target:
-            continue
-        ideal_total = pool / (target * (vault_happiness / 100))
-        diff = round(ideal_total - current_total, 1)
-        if abs(diff) < 0.5:
-            status = "Balanced"
-        elif diff > 0:
-            status = f"Needs +{diff} {stat}"
-        else:
-            status = f"Remove {abs(diff)} {stat}"
-        print(f"{room_key} | Time: {prod_time}s | {status}")
+    initial_overall_avg = calculate_overall_average(initial_mean_finder)
+    before_balance_overall_avg = calculate_overall_average(before_balancing_times)
 
-    # --- Auto-balancing (limited passes, efficient selection) -------------------
-    # --- Auto-balancing (limited passes, efficient selection) -------------------
-    TRAINING_ROOMS = {"Armory", "Dojo", "Gym"}
+    print(f"\n{'='*60}")
+    print("PERFORMANCE COMPARISON")
+    print(f"{'='*60}")
+    print(f"Initial Average Time: {initial_overall_avg}s")
+    print(f"Before Balancing Average Time: {before_balance_overall_avg}s")
 
+    # Determine which state to use as baseline for balancing
+    if initial_overall_avg > 0 and initial_overall_avg < before_balance_overall_avg:
+        print(f"\n⚠️  Initial assignment ({initial_overall_avg}s) is BETTER than before balancing ({before_balance_overall_avg}s)")
+        print(f"    Using INITIAL state as baseline for balancing process")
+        sortedL.clear()
+        for room_key, dwellers in initial_rooms.items():
+            sortedL[room_key] = dwellers.copy()
+        working_stats = dweller_stats_initial.copy()
+        print(f"    ✓ Balancing will optimize from initial state")
+    else:
+        print(f"\n✓ Before balancing ({before_balance_overall_avg}s) is better than or equal to initial ({initial_overall_avg}s)")
+        print(f"    Using BEFORE BALANCING state as baseline")
+        working_stats = dweller_stats.copy()
 
-    def recalc_mean_finder():
-        mean_finder.clear()
-        for room_key, dwellers in sortedL.items():
-            t = get_room_production_time(room_key, dwellers, dweller_stats, happiness=vault_happiness / 100)
-            if t:
-                mean_finder[room_key] = t
-
-
-    def best_dweller(room_key):
-        _, stat, _ = parse_room(room_key)
-        return max(sortedL[room_key], key=lambda d: dweller_stats.get(d, {}).get(stat, 0))
-
-
-    def worst_dweller(room_key):
-        _, stat, _ = parse_room(room_key)
-        return min(sortedL[room_key], key=lambda d: dweller_stats.get(d, {}).get(stat, 0))
-
-    recalc_mean_finder()
-    before_balancing_times = dict(mean_finder)
-
+    # --- Auto-balancing ---
     for pass_num in range(1, MAX_PASSES + 1):
-        recalc_mean_finder()
+        mean_finder = recalc_mean_finder(working_stats)
         geo_mean, wap_mean, caf_mean = group_means(mean_finder)
-    
+
         if not mean_finder:
             break
 
         def is_balanced_local():
             for r, t in mean_finder.items():
                 rtype, _, _ = parse_room(r)
-            
-                # Determine target
                 if rtype in ("Power", "Power2"):
                     target = geo_mean
                 elif rtype in ("Water", "Water2"):
@@ -573,11 +628,8 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
                     target = caf_mean
                 else:
                     continue
-            
-                # CRITICAL: Check for None before math operations
                 if target is None or t is None:
                     continue
-                
                 if abs(t - target) > BALANCE_THRESHOLD:
                     return False
             return True
@@ -592,59 +644,88 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
             rooms = [r for r in mean_finder if r[0] in codes and r[0] not in TRAINING_ROOMS]
             if len(rooms) < 2:
                 continue
-            
+    
             weakest = max(rooms, key=lambda r: mean_finder[r])
             strongest = min(rooms, key=lambda r: mean_finder[r])
-        
+
             if weakest == strongest:
                 continue
-            if weakest[0] in TRAINING_ROOMS or strongest[0] in TRAINING_ROOMS:
+
+            weakest_time = mean_finder.get(weakest)
+            strongest_time = mean_finder.get(strongest)
+
+            if weakest_time is None or strongest_time is None:
                 continue
 
-            if sortedL.get(strongest) and sortedL.get(weakest):
-                give = best_dweller(strongest)
-                take = worst_dweller(weakest)
-                sortedL[strongest].remove(give)
-                sortedL[weakest].remove(take)
-                sortedL[strongest].append(take)
-                sortedL[weakest].append(give)
-                print(f"Swapped {give} ↔ {take} between {strongest} and {weakest}")
-            elif sortedL.get(strongest):
-                mover = best_dweller(strongest)
-                sortedL[strongest].remove(mover)
-                sortedL[weakest].append(mover)
-                print(f"Moved {mover} from {strongest} → {weakest}")
-            elif finalRemaining:
-                mover = finalRemaining.pop(0)
-                sortedL[weakest].append(mover)
-                print(f"Assigned {mover} → {weakest}")
+            time_diff = weakest_time - strongest_time
 
-        # --- Print final mapping and compute times ---------------------------------
-        print("")
-        for room, dwellers in sortedL.items():
-            print(f"Room: {room} -> Dwellers: {', '.join(dwellers)}")
-        print("")
+            if time_diff < BALANCE_THRESHOLD * 2:
+                continue
 
-        recalc_mean_finder()
-        after_balancing_times = dict(mean_finder)
-        mean_finder.clear()
+            _, stat, _ = parse_room(weakest)
 
-        print("\nFINAL TIMES AFTER BALANCING")
-        for room_key, dwellers in sortedL.items():
-            t = get_room_production_time(room_key, dwellers, dweller_stats, happiness=vault_happiness/100)
-            if t:
-                mean_finder[room_key] = t
-                print(f"{room_key} -> {t} seconds")
+            if not sortedL.get(strongest) or not sortedL.get(weakest):
+                continue
 
+            best_from_strong = max(sortedL[strongest], 
+                                    key=lambda d: working_stats.get(d, {}).get(stat, 0))
+            worst_from_weak = min(sortedL[weakest], 
+                                    key=lambda d: working_stats.get(d, {}).get(stat, 0))
 
-    # --- Further Improvement by using outfit mods ------------------
+            best_stat = working_stats.get(best_from_strong, {}).get(stat, 0)
+            worst_stat = working_stats.get(worst_from_weak, {}).get(stat, 0)
+
+            if best_stat <= worst_stat * 1.5:
+                continue
+
+            sortedL[strongest].remove(best_from_strong)
+            sortedL[weakest].remove(worst_from_weak)
+            sortedL[strongest].append(worst_from_weak)
+            sortedL[weakest].append(best_from_strong)
+            print(f"Swapped {best_from_strong} (stat:{best_stat}) ↔ {worst_from_weak} (stat:{worst_stat})")
+            print(f"  between {strongest} and {weakest}")
+
+    # --- Final state after balancing ---
+    print("")
+    for room, dwellers in sortedL.items():
+        print(f"Room: {room} -> Dwellers: {', '.join(dwellers)}")
+    print("")
+
+    after_balancing_times = recalc_mean_finder(working_stats)
+
+    print("\nFINAL TIMES AFTER BALANCING")
+    for room_key, t in after_balancing_times.items():
+        print(f"{room_key} -> {t} seconds")
+
+    geo_mean, wap_mean, caf_mean = group_means(after_balancing_times)
+
+    if geo_mean is not None:
+        print(f"\nGeothermal Average Time: {round(geo_mean,1)} seconds")
+    if wap_mean is not None:
+        print(f"Water Plant Average Time: {round(wap_mean,1)} seconds")
+    if caf_mean is not None:
+        print(f"Cafeteria Average Time: {round(caf_mean,1)} seconds")
+
+    # --- OUTFIT OPTIMIZATION ---
     print("\n" + "="*60)
     print("OUTFIT OPTIMIZATION")
     print("="*60)
 
+    # FIX 1: Load existing outfits from database ONCE
+    existing_outfit_assignments = {}
+    cursor.execute("SELECT dweller_id, Outfit FROM dwellers WHERE Outfit IS NOT NULL AND outfit != ''")
+    existing_outfits = cursor.fetchall()
+
+    print(f"\nExisting outfit assignments found: {len(existing_outfits)}")
+    for dweller_id, outfit_id in existing_outfits:
+        existing_outfit_assignments[str(dweller_id)] = outfit_id
+        print(f"  Dweller {dweller_id} already has outfit {outfit_id}")
+
     # Get outfit data
     outfit_mods = {}
-    for outfit_id in outfitlist:
+    all_outfit_ids = set(outfitlist) | set(existing_outfit_assignments.values())
+    
+    for outfit_id in all_outfit_ids:
         cursor.execute(
             "SELECT Name, `Item ID`, S, P, A, Sex FROM Outfit WHERE `Item ID` = ?",
             (outfit_id,)
@@ -660,24 +741,93 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
                 'sex': sex
             }
 
-    print(f"\nAvailable Outfits: {len(outfit_mods)}")
-    for outfit_id, mods in outfit_mods.items():
-        print(f"  {mods['name']}: S+{mods['s']}, P+{mods['p']}, A+{mods['a']}")
+    print(f"\nAvailable Outfits for NEW Assignment: {len(outfitlist)}")
+    for outfit_id in outfitlist:
+        if outfit_id in outfit_mods:
+            mods = outfit_mods[outfit_id]
+            print(f"  {mods['name']}: S+{mods['s']}, P+{mods['p']}, A+{mods['a']}")
 
-    # Create a copy of dweller_stats to apply outfit mods
-    dweller_stats_with_outfits = {k: v.copy() for k, v in dweller_stats.items()}
+    # FIX 2: Create a FRESH copy for outfit calculations
+    dweller_stats_with_outfits = {k: v.copy() for k, v in working_stats.items()}
+    
+    # FIX 3: Track assignments properly - start fresh, then add existing
+    outfit_assignments = {}
+    outfits_to_relocate = []
 
-    # Track outfit assignments
-    outfit_assignments = {}  # dweller_id -> outfit_id
+    # Validate existing outfits
+    print("\n" + "-"*60)
+    print("VALIDATING EXISTING OUTFIT ASSIGNMENTS")
+    print("-"*60)
 
-    # Calculate current room needs (how much each room deviates from average)
+    outfit_stat_map = {'Strength': 's', 'Perception': 'p', 'Agility': 'a'}
+
+    for dweller_id, outfit_id in existing_outfit_assignments.items():
+        dweller_room = None
+        for room_key, dwellers in sortedL.items():
+            if dweller_id in dwellers:
+                dweller_room = room_key
+                break
+    
+        if dweller_room and outfit_id in outfit_mods:
+            room_type, stat, size = parse_room(dweller_room)
+            outfit = outfit_mods[outfit_id]
+            stat_key = outfit_stat_map.get(stat)
+        
+            if stat_key and outfit[stat_key] > 0:
+                # Keep this outfit - it's correctly placed
+                outfit_assignments[dweller_id] = outfit_id
+                # Apply bonuses ONCE
+                dweller_stats_with_outfits[dweller_id]['Strength'] += outfit['s']
+                dweller_stats_with_outfits[dweller_id]['Perception'] += outfit['p']
+                dweller_stats_with_outfits[dweller_id]['Agility'] += outfit['a']
+                print(f"✓ Dweller {dweller_id} in {room_type} room with {outfit['name']} (+{outfit[stat_key]} {stat})")
+            else:
+                # Mark for relocation
+                print(f"⚠️  Dweller {dweller_id} in {room_type} room has MISPLACED {outfit['name']}")
+                print(f"    Room needs {stat}, outfit gives: S+{outfit['s']}, P+{outfit['p']}, A+{outfit['a']}")
+                outfits_to_relocate.append((dweller_id, outfit_id))
+
+    # Handle relocations
+    if outfits_to_relocate:
+        print(f"\n⚠️  Found {len(outfits_to_relocate)} misplaced outfits - attempting to relocate...")
+    
+        for old_dweller_id, outfit_id in outfits_to_relocate:
+            outfit = outfit_mods[outfit_id]
+            best_stat = max([('Strength', outfit['s']), ('Perception', outfit['p']), ('Agility', outfit['a'])], 
+                           key=lambda x: x[1])
+            best_stat_name, best_stat_value = best_stat
+        
+            if best_stat_value == 0:
+                continue
+        
+            found_new_home = False
+            for room_key, dwellers in sortedL.items():
+                room_type, stat, size = parse_room(room_key)
+                if room_key[0] in TRAINING_ROOMS:
+                    continue
+                if stat == best_stat_name:
+                    for potential_dweller in dwellers:
+                        if potential_dweller not in outfit_assignments and potential_dweller != old_dweller_id:
+                            outfit_assignments[potential_dweller] = outfit_id
+                            # Apply bonuses to new dweller
+                            dweller_stats_with_outfits[potential_dweller]['Strength'] += outfit['s']
+                            dweller_stats_with_outfits[potential_dweller]['Perception'] += outfit['p']
+                            dweller_stats_with_outfits[potential_dweller]['Agility'] += outfit['a']
+                            print(f"  ✓ Moved {outfit['name']} from Dweller {old_dweller_id} to Dweller {potential_dweller}")
+                            found_new_home = True
+                            break
+                if found_new_home:
+                    break
+
+    # Calculate room needs
     room_needs = {}
-    for room_key, prod_time in mean_finder.items():
+    current_times = recalc_mean_finder(dweller_stats_with_outfits)
+    
+    for room_key, prod_time in current_times.items():
         room_type, stat, size = parse_room(room_key)
         if room_type is None or room_key[0] in TRAINING_ROOMS:
             continue
-    
-        # Get target time
+
         if room_type in ("Power", "Power2"):
             target = geo_mean
         elif room_type in ("Water", "Water2"):
@@ -686,17 +836,16 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
             target = caf_mean
         else:
             continue
-    
+
         if target is None:
             continue
-    
-        # Calculate how much stat is needed to reach target
+
         pool = BASE_POOL[room_type] * SIZE_MULTIPLIER[size]
         dwellers = sortedL[room_key]
-        current_total = sum(dweller_stats.get(d, {}).get(stat, 0) for d in dwellers)
+        current_total = sum(dweller_stats_with_outfits.get(d, {}).get(stat, 0) for d in dwellers)
         ideal_total = pool / (target * (vault_happiness / 100))
         stat_deficit = ideal_total - current_total
-    
+
         room_needs[room_key] = {
             'stat': stat,
             'deficit': stat_deficit,
@@ -706,199 +855,174 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
             'size': size
         }
 
-    # Sort rooms by deficit (prioritize rooms that need the most help)
     sorted_rooms = sorted(room_needs.items(), key=lambda x: x[1]['deficit'], reverse=True)
 
-    # Assign outfits to maximize impact
+    # Track outfit usage
     from collections import Counter
-
-    # Remove outfits that were not found in the database
-    outfit_inventory = Counter(
-        oid for oid in outfitlist
-        if oid in outfit_mods
-    )
+    available_outfits = [oid for oid in outfitlist if oid in outfit_mods and oid not in outfit_assignments.values()]
+    outfit_inventory = Counter(available_outfits)
     outfit_used = {oid: 0 for oid in outfit_inventory}
+
+    print(f"\nOutfits available for new assignments: {sum(outfit_inventory.values())}")
+    print(f"Outfits already assigned: {len(outfit_assignments)}")
 
     def outfit_available(outfit_id):
         return outfit_used.get(outfit_id, 0) < outfit_inventory.get(outfit_id, 0)
 
     def any_outfit_left():
-        return any(
-            outfit_used.get(oid, 0) < outfit_inventory.get(oid, 0)
-            for oid in outfit_inventory
-        )
+        return any(outfit_used.get(oid, 0) < outfit_inventory.get(oid, 0) for oid in outfit_inventory)
+
+    def get_outfit_bonus_for_stat(outfit_id, stat_name):
+        if outfit_id not in outfit_mods:
+            return 0
+        outfit = outfit_mods[outfit_id]
+        stat_key = outfit_stat_map.get(stat_name)
+        return outfit[stat_key] if stat_key else 0
+
+    def get_outfit_efficiency(outfit_id, stat_name):
+        if outfit_id not in outfit_mods:
+            return 0
+        outfit = outfit_mods[outfit_id]
+        total_bonus = outfit['s'] + outfit['p'] + outfit['a']
+        if total_bonus == 0:
+            return 0
+        relevant_bonus = get_outfit_bonus_for_stat(outfit_id, stat_name)
+        return relevant_bonus / total_bonus
+
+    # PHASE 1: Deficit balancing
     print("\n" + "-"*60)
-    print("OUTFIT ASSIGNMENT STRATEGY - PHASE 1: BALANCING")
+    print("OUTFIT ASSIGNMENT - PHASE 1: DEFICIT BALANCING")
     print("-"*60)
 
     for room_key, need_data in sorted_rooms:
         stat_needed = need_data['stat']
         deficit = need_data['deficit']
         dwellers = need_data['dwellers']
-    
+
         if deficit <= 0:
             print(f"\n{room_key} is already balanced or overcapacity")
             continue
-    
+
         print(f"\n{room_key} needs +{round(deficit, 1)} {stat_needed}")
-    
-        # Find best outfits for this stat
-        outfit_stat_map = {'Strength': 's', 'Perception': 'p', 'Agility': 'a'}
-        stat_key = outfit_stat_map.get(stat_needed)
-    
-        if not stat_key or not any_outfit_left():
+
+        if not any_outfit_left():
+            print(f"  No outfits remaining")
             continue
 
-        # Sort available outfits by their bonus for the needed stat
-        # Filter out outfits with 0 bonus for the needed stat
         relevant_outfits = [
             oid for oid in outfit_inventory
-            if oid in outfit_mods
-            and outfit_mods[oid][stat_key] > 0
-            and outfit_available(oid)
+            if oid in outfit_mods and get_outfit_bonus_for_stat(oid, stat_needed) > 0 and outfit_available(oid)
         ]
-  
+
         if not relevant_outfits:
             print(f"  No outfits available with {stat_needed} bonus")
             continue
-    
+
         best_outfits = sorted(
             relevant_outfits,
-            key=lambda oid: outfit_mods[oid][stat_key],
+            key=lambda oid: (get_outfit_efficiency(oid, stat_needed), get_outfit_bonus_for_stat(oid, stat_needed)),
             reverse=True
         )
-    
-        # Assign outfits to dwellers with lowest base stats in this room
-        dwellers_sorted = sorted(
-            dwellers,
-            key=lambda d: dweller_stats.get(d, {}).get(stat_needed, 0)
-        )
-    
-        assigned_count = 0
+
+        dwellers_sorted = sorted(dwellers, key=lambda d: dweller_stats_with_outfits.get(d, {}).get(stat_needed, 0))
+
         for dweller_id in dwellers_sorted:
             if not best_outfits:
                 break
-        
-            # Skip if dweller already has an outfit
             if dweller_id in outfit_assignments:
                 continue
-        
-            # Take the best available outfit
+
             outfit_id = best_outfits.pop(0)
             outfit_used[outfit_id] += 1
-
-        
-            # Assign outfit to dweller
             outfit_assignments[dweller_id] = outfit_id
-        
-            # Apply outfit mods to dweller stats
-            dweller_stats_with_outfits[dweller_id]['Strength'] += outfit_mods[outfit_id]['s']
-            dweller_stats_with_outfits[dweller_id]['Perception'] += outfit_mods[outfit_id]['p']
-            dweller_stats_with_outfits[dweller_id]['Agility'] += outfit_mods[outfit_id]['a']
-        
-            assigned_count += 1
-            print(f"  Assigned {outfit_mods[outfit_id]['name']} (+{outfit_mods[outfit_id][stat_key]} {stat_needed}) to Dweller {dweller_id}")
-        
-            deficit -= outfit_mods[outfit_id][stat_key]
+            outfit = outfit_mods[outfit_id]
+
+            # Apply outfit bonuses
+            dweller_stats_with_outfits[dweller_id]['Strength'] += outfit['s']
+            dweller_stats_with_outfits[dweller_id]['Perception'] += outfit['p']
+            dweller_stats_with_outfits[dweller_id]['Agility'] += outfit['a']
+
+            bonus = get_outfit_bonus_for_stat(outfit_id, stat_needed)
+            efficiency = round(get_outfit_efficiency(outfit_id, stat_needed) * 100, 1)
+            print(f"  ✓ Assigned {outfit['name']} to Dweller {dweller_id} (+{bonus} {stat_needed}, {efficiency}% efficient)")
+
+            deficit -= bonus
             if deficit <= 0:
                 print(f"  ✓ Room balanced!")
                 break
-    
-        if assigned_count == 0:
-            print(f"  No suitable outfits available")
 
-    # PHASE 2: Assign remaining outfits to big rooms
+    # PHASE 2: High-value rooms
     if any_outfit_left():
         print("\n" + "-"*60)
-        print("OUTFIT ASSIGNMENT STRATEGY - PHASE 2: BIG ROOMS")
+        print("OUTFIT ASSIGNMENT - PHASE 2: HIGH-VALUE ROOMS")
         print("-"*60)
-        remaining_count = sum(
-            outfit_inventory[oid] - outfit_used.get(oid, 0)
-            for oid in outfit_inventory
-        )
-        print(f"\n{remaining_count} outfits remaining - assigning to largest rooms")
+        
+        remaining_count = sum(outfit_inventory[oid] - outfit_used.get(oid, 0) for oid in outfit_inventory)
+        print(f"\n{remaining_count} outfits remaining")
 
-    
-        # Get production rooms sorted by size (largest first)
-        production_rooms = [
-            (room_key, need_data) 
-            for room_key, need_data in room_needs.items()
-        ]
-    
-        # Sort by room size priority: size9 > size6 > size3
-        size_priority = {'size9': 3, 'size6': 2, 'size3': 1}
+        production_rooms = [(room_key, need_data) for room_key, need_data in room_needs.items()]
+        level_scores = {'lvl3': 3, 'lvl2': 2, 'lvl1': 1}
+        size_scores = {'size9': 9, 'size6': 6, 'size3': 3}
         production_rooms.sort(
-            key=lambda x: size_priority.get(x[1]['size'], 0),
+            key=lambda x: (level_scores.get(x[0][1], 1) ** 2) * size_scores.get(x[0][2], 1),
             reverse=True
         )
-    
+
         for room_key, need_data in production_rooms:
             if not any_outfit_left():
                 break
- 
+
             stat_needed = need_data['stat']
             dwellers = need_data['dwellers']
-            size = need_data['size']
-        
-            print(f"\nAssigning to {room_key} ({size}):")
-        
-            # Get dwellers in this room that don't have outfits yet
             unequipped_dwellers = [d for d in dwellers if d not in outfit_assignments]
-        
-            if not unequipped_dwellers:
-                print(f"  All dwellers already equipped")
-                continue
-        
-            # Sort dwellers by their stat (lowest first - give them the boost)
-            outfit_stat_map = {'Strength': 's', 'Perception': 'p', 'Agility': 'a'}
-            stat_key = outfit_stat_map.get(stat_needed)
-        
-            unequipped_dwellers.sort(
-                key=lambda d: dweller_stats.get(d, {}).get(stat_needed, 0)
-            )
-        
-            # Assign best remaining outfits to these dwellers
-            for dweller_id in unequipped_dwellers:
-                if not any_outfit_left():
-                    break
-            
-                # Find best outfit for this room's stat from remaining outfits
-                best_outfit = max(
-                    (
-                        oid for oid in outfit_inventory
-                        if oid in outfit_mods and outfit_available(oid)
-                    ),
-                    key=lambda oid: outfit_mods[oid][stat_key]
-                )
-     
-                # Assign the outfit
-                outfit_assignments[dweller_id] = best_outfit
-                outfit_used[best_outfit] += 1
-            
-                # Apply outfit mods
-                dweller_stats_with_outfits[dweller_id]['Strength'] += outfit_mods[best_outfit]['s']
-                dweller_stats_with_outfits[dweller_id]['Perception'] += outfit_mods[best_outfit]['p']
-                dweller_stats_with_outfits[dweller_id]['Agility'] += outfit_mods[best_outfit]['a']
-            
-                print(f"  Assigned {outfit_mods[best_outfit]['name']} (+{outfit_mods[best_outfit][stat_key]} {stat_needed}) to Dweller {dweller_id}")
 
-    # Recalculate production times with outfits
-    mean_finder_with_outfits = {}
+            if not unequipped_dwellers:
+                continue
+
+            print(f"\nAssigning to {room_key}:")
+
+            unequipped_dwellers.sort(key=lambda d: dweller_stats_with_outfits.get(d, {}).get(stat_needed, 0))
+
+            relevant_outfits = [
+                oid for oid in outfit_inventory
+                if oid in outfit_mods and get_outfit_bonus_for_stat(oid, stat_needed) > 0 and outfit_available(oid)
+            ]
+
+            if not relevant_outfits:
+                continue
+
+            relevant_outfits.sort(key=lambda oid: get_outfit_bonus_for_stat(oid, stat_needed), reverse=True)
+
+            for dweller_id in unequipped_dwellers:
+                if not relevant_outfits:
+                    break
+
+                outfit_id = relevant_outfits.pop(0)
+                outfit_used[outfit_id] += 1
+                outfit_assignments[dweller_id] = outfit_id
+                outfit = outfit_mods[outfit_id]
+
+                dweller_stats_with_outfits[dweller_id]['Strength'] += outfit['s']
+                dweller_stats_with_outfits[dweller_id]['Perception'] += outfit['p']
+                dweller_stats_with_outfits[dweller_id]['Agility'] += outfit['a']
+
+                bonus = get_outfit_bonus_for_stat(outfit_id, stat_needed)
+                print(f"  ✓ Assigned {outfit['name']} to Dweller {dweller_id} (+{bonus} {stat_needed})")
+
+    # Recalculate with outfits
+    mean_finder_with_outfits = recalc_mean_finder(dweller_stats_with_outfits)
+    
     print("\n" + "="*60)
     print("PRODUCTION TIMES WITH OUTFITS")
     print("="*60)
 
-    for room_key, dwellers in sortedL.items():
+    for room_key, t in mean_finder_with_outfits.items():
         if room_key[0] in TRAINING_ROOMS:
             continue
-        t = get_room_production_time(room_key, dwellers, dweller_stats_with_outfits, happiness=vault_happiness/100)
-        if t:
-            mean_finder_with_outfits[room_key] = t
-            old_time = mean_finder.get(room_key, 0)
-            improvement = old_time - t
-            print(f"{room_key} -> {t}s (was {old_time}s, improved by {round(improvement, 1)}s)")
+        old_time = after_balancing_times.get(room_key, 0)
+        improvement = old_time - t
+        print(f"{room_key} -> {t}s (was {old_time}s, improved by {round(improvement, 1)}s)")
 
-    # Calculate new averages
     geo_mean_new, wap_mean_new, caf_mean_new = group_means(mean_finder_with_outfits)
 
     print(f"\n{'='*60}")
@@ -912,71 +1036,39 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
     if caf_mean is not None and caf_mean_new is not None:
         print(f"Food:   {round(caf_mean, 1)}s -> {round(caf_mean_new, 1)}s (Δ {round(caf_mean - caf_mean_new, 1)}s)")
 
+    # FIX 4: Correct outfit assignment summary
     print(f"\n{'='*60}")
     print("OUTFIT ASSIGNMENT SUMMARY")
     print(f"{'='*60}")
+
+    new_assignments = {k: v for k, v in outfit_assignments.items() if k not in existing_outfit_assignments}
+    kept_existing = {k: v for k, v in outfit_assignments.items() if k in existing_outfit_assignments}
+    
     print(f"Total outfits assigned: {len(outfit_assignments)}")
-    remaining = sum(
-        outfit_inventory[oid] - outfit_used.get(oid, 0)
-        for oid in outfit_inventory
-    )
+    print(f"  - Pre-existing (kept): {len(kept_existing)}")
+    print(f"  - Newly assigned: {len(new_assignments)}")
+    print(f"  - Relocated: {len(outfits_to_relocate)}")
+
+    remaining = sum(outfit_inventory[oid] - outfit_used.get(oid, 0) for oid in outfit_inventory)
     print(f"Remaining unassigned outfits: {remaining}")
 
-
-    if outfit_assignments:
-        print("\nAssigned Outfits by Room:")
-        for room_key, dwellers in sortedL.items():
-            if room_key[0] in TRAINING_ROOMS:
-                continue
-            room_outfits = [(d, outfit_assignments.get(d)) for d in dwellers if d in outfit_assignments]
-            if room_outfits:
-                print(f"\n{room_key}:")
-                for dweller_id, outfit_id in room_outfits:
-                    outfit = outfit_mods[outfit_id]
-                    print(f"  Dweller {dweller_id} -> {outfit['name']} (S+{outfit['s']}, P+{outfit['p']}, A+{outfit['a']})")
-    else:
-        print("No outfits were assigned (all rooms already balanced)")
-
-    remaining = {
-        oid: outfit_inventory[oid] - outfit_used.get(oid, 0)
-        for oid in outfit_inventory
-        if outfit_inventory[oid] - outfit_used.get(oid, 0) > 0
-    }
-
-    if remaining:
-        print(f"\nUnassigned outfits ({sum(remaining.values())}):")
-        for oid, count in remaining.items():
-            outfit = outfit_mods[oid]
-            for _ in range(count):
-                print(f"  {outfit['name']} (S+{outfit['s']}, P+{outfit['p']}, A+{outfit['a']})")
-
-    # --- Prepare arrays for plotting (exclude training rooms) ------------------
+    # Plotting
     exclude = {"Gym", "Armory", "Dojo"}
     rooms = [r for r in list(before_balancing_times.keys()) if r[0] not in exclude]
 
-    initial_times = {r: initial_mean_finder.get(r) for r in rooms}
-    before_times = {r: before_balancing_times.get(r) for r in rooms}
-    after_times = {r: mean_finder.get(r) for r in rooms}
-    outfit_times = {r: mean_finder_with_outfits.get(r) for r in rooms}
-
-    initial = [np.nan if initial_times.get(r) is None else initial_times[r] for r in rooms]
-    before = [np.nan if before_times.get(r) is None else before_times[r] for r in rooms]
-    after = [np.nan if after_times.get(r) is None else after_times[r] for r in rooms]
-    with_outfits = [np.nan if outfit_times.get(r) is None else outfit_times[r] for r in rooms]
-
-    initial_arr = np.array(initial, dtype=float)
-    before_arr = np.array(before, dtype=float)
-    after_arr = np.array(after, dtype=float)
-    outfit_arr = np.array(with_outfits, dtype=float)
+    initial = [initial_mean_finder.get(r, np.nan) for r in rooms]
+    before = [before_balancing_times.get(r, np.nan) for r in rooms]
+    after = [after_balancing_times.get(r, np.nan) for r in rooms]
+    with_outfits = [mean_finder_with_outfits.get(r, np.nan) for r in rooms]
 
     x = np.arange(len(rooms))
     width = 0.2  
 
     plt.figure(figsize=(14, 7))  
-    plt.bar(x - 1.5*width, initial_arr, width=width, label="Initial", color='#ff6b6b')
-    plt.bar(x - 0.5*width, before_arr, width=width, label="Before Balancing", color='#feca57')
-    plt.bar(x + 0.5*width, after_arr, width=width, label="After Balancing", color='#48dbfb')
-    plt.bar(x + 1.5*width, outfit_arr, width=width, label="With Outfits", color='#1dd1a1')
+    plt.bar(x - 1.5*width, initial, width=width, label="Initial", color='#ff6b6b')
+    plt.bar(x - 0.5*width, before, width=width, label="Before Balancing", color='#feca57')
+    plt.bar(x + 0.5*width, after, width=width, label="After Balancing", color='#48dbfb')
+    plt.bar(x + 1.5*width, with_outfits, width=width, label="With Outfits", color='#1dd1a1')
 
     plt.xticks(ticks=x, labels=[f"{r[0]}-{r[1]}-{r[2]}-{r[3]}" for r in rooms], rotation=45, ha="right")
     plt.ylabel("Production Time (s)")
@@ -988,29 +1080,156 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     plot_filename = f"vault_production_{timestamp}.png"
     plt.savefig(plot_filename, dpi=150, bbox_inches='tight')
-    plt.close()  # Close the figure to free memory
+    plt.close()
     print(f"\nPlot saved as: {plot_filename}")
 
+    # Save optimization results to JSON
+    optimization_results = {
+        'timestamp': datetime.now().isoformat(),
+        'vault_name': vault_name,
+        'dweller_assignments': [],
+        'room_assignments': {},
+        'performance': {}
+    }
+    
 
+
+    # Around line 1140 - improve the dweller movement detection
+    for dweller in dwellers_list:
+        dweller_id = str(dweller.get('serializeId'))
+        first_name = dweller.get('name', '')
+        last_name = dweller.get('lastName', '')
+        full_name = f"{first_name} {last_name}".strip()
+    
+        assigned_room = None
+        for room_key, dwellers in sortedL.items():
+            if dweller_id in dwellers:
+                assigned_room = room_key
+                break
+    
+        if assigned_room:
+            room_type, stat, size = parse_room(assigned_room)
+            assigned_room_info = {
+                'room_type': assigned_room[0],
+                'room_level': assigned_room[1],
+                'room_size': assigned_room[2],
+                'room_number': assigned_room[3],
+            }
+
+            # IMPROVED: Find previous room by checking if dweller was in ANY initial room
+            previous_room_info = None
+            previous_room_key = None
+            for room_key, dwellers in initial_rooms.items():
+                if dweller_id in dwellers:
+                    previous_room_key = room_key
+                    previous_room_info = {
+                        'room_type': room_key[0],
+                        'room_level': room_key[1],
+                        'room_size': room_key[2],
+                        'room_number': room_key[3],
+                    }
+                    break
+
+            # IMPROVED: Better movement detection - compare room types and properties
+            moved_room_info = None
+            if previous_room_info:
+                # Check if ANY property changed (type, level, or size)
+                # We ignore room_number since that's just for tracking multiple same rooms
+                room_changed = (
+                    previous_room_info['room_type'] != assigned_room_info['room_type'] or
+                    previous_room_info['room_level'] != assigned_room_info['room_level'] or
+                    previous_room_info['room_size'] != assigned_room_info['room_size']
+                )
+            
+                # Also check if it's literally a different room instance
+                room_number_changed = previous_room_info['room_number'] != assigned_room_info['room_number']
+            
+                if room_changed or room_number_changed:
+                    moved_room_info = {
+                        'from': f"{previous_room_info['room_type']}_{previous_room_info['room_level']}_{previous_room_info['room_size']}_{previous_room_info['room_number']}",
+                        'to': f"{assigned_room_info['room_type']}_{assigned_room_info['room_level']}_{assigned_room_info['room_size']}_{assigned_room_info['room_number']}",
+                    }
+            elif not previous_room_info:
+                # Dweller wasn't in initial_rooms at all - this is a new assignment
+                moved_room_info = {
+                    'from': 'Unassigned/Training',
+                    'to': f"{assigned_room_info['room_type']}_{assigned_room_info['room_level']}_{assigned_room_info['room_size']}_{assigned_room_info['room_number']}",
+                }
+
+            dweller_entry = {
+                'id': dweller_id,
+                'name': full_name if full_name else f"Dweller {dweller_id}",
+                'assigned_room': assigned_room_info,
+                'previous_room': previous_room_info,
+                'primary_stat': stat,
+                'stat_value': working_stats.get(dweller_id, {}).get(stat, 0),
+                'dweller_moved': moved_room_info  # This will now be populated correctly
+            }
+
+            # Add outfit info if assigned
+            if dweller_id in outfit_assignments:
+                outfit_id = outfit_assignments[dweller_id]
+                outfit = outfit_mods[outfit_id]
+                dweller_entry['outfit'] = {
+                    'outfit_id': outfit_id,
+                    'outfit_name': outfit.get('name', 'Unknown'),
+                    'strength_bonus': outfit.get('s', 0),
+                    'perception_bonus': outfit.get('p', 0),
+                    'agility_bonus': outfit.get('a', 0),
+                }
+
+            optimization_results['dweller_assignments'].append(dweller_entry)
+
+
+
+
+    # Save room assignments
+    for room_key, dwellers in sortedL.items():
+        room_id = f"{room_key[0]}_{room_key[1]}_{room_key[2]}_{room_key[3]}"
+        dweller_list = []
+        for dweller_id in dwellers:
+            dweller_info = next((d for d in optimization_results['dweller_assignments'] if d['id'] == dweller_id), {})
+            dweller_list.append({
+                'id': dweller_id,
+                'name': dweller_info.get('name', f"Dweller {dweller_id}")
+            })
+        
+        optimization_results['room_assignments'][room_id] = {
+            'room_type': room_key[0],
+            'level': room_key[1],
+            'size': room_key[2],
+            'number': room_key[3],
+            'dwellers': dweller_list,
+            'initial_time': initial_mean_finder.get(room_key),
+            'before_balance_time': before_balancing_times.get(room_key),
+            'after_balance_time': after_balancing_times.get(room_key),
+            'production_time': mean_finder_with_outfits.get(room_key)
+        }
+    
+    optimization_results['performance'] = {
+        'initial_avg': calculate_overall_average(initial_mean_finder),
+        'before_balance_avg': calculate_overall_average(before_balancing_times),
+        'after_balance_avg': calculate_overall_average(after_balancing_times),
+        'with_outfits_avg': calculate_overall_average(mean_finder_with_outfits),
+        'power_avg': round(geo_mean_new, 2) if geo_mean_new else None,
+        'water_avg': round(wap_mean_new, 2) if wap_mean_new else None,
+        'food_avg': round(caf_mean_new, 2) if caf_mean_new else None
+    }
+    
+    results_file = f"{vault_name}_optimization_results.json"
+    with open(results_file, 'w') as f:
+        json.dump(optimization_results, f, indent=2)
+    
+    print(f"✓ Optimization results saved to {results_file}")
+    
     from VaultPerformanceTracker import VaultPerformanceTracker
-
-    def calculate_overall_average(mean_map):
-        """Calculate overall average across all production rooms"""
-        times = [t for r, t in mean_map.items() if r[0] not in {"Gym", "Armory", "Dojo"}]
-        return round(sum(times) / len(times), 2) if times else 0
-
-    initial_overall = calculate_overall_average(initial_mean_finder)
-    before_balance_overall = calculate_overall_average(before_balancing_times)
-    after_balance_overall = calculate_overall_average(mean_finder)
-    with_outfits_overall = calculate_overall_average(mean_finder_with_outfits)
-
-    # Track performance (records data)
     tracker = VaultPerformanceTracker(vault_name)
     tracker.add_cycle_data(
-        initial_avg=initial_overall,
-        before_balance_avg=before_balance_overall,
-        after_balance_avg=after_balance_overall,
-        with_outfits_avg=with_outfits_overall
+        initial_avg=optimization_results['performance']['initial_avg'],
+        before_balance_avg=optimization_results['performance']['before_balance_avg'],
+        after_balance_avg=optimization_results['performance']['after_balance_avg'],
+        with_outfits_avg=optimization_results['performance']['with_outfits_avg']
     )
 
     conn.close()
+    return results_file

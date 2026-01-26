@@ -158,5 +158,4 @@ class VaultPerformanceTracker:
     def clear_history(self):
         """Clear all recorded history"""
         self.history = {'timestamps': [], 'initial': [], 'before_balance': [], 'after_balance': [], 'with_outfits': []}
-        self._save_history()
         print(f"✓ Cleared all history for {self.vault_name}")

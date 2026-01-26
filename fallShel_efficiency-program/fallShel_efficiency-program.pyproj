@@ -23,12 +23,14 @@
   <ItemGroup>
     <Compile Include="AdaptiveVaultOptimizer.py" />
     <Compile Include="fallShel_efficiency_program.py" />
+    <Compile Include="fallout_gui.py" />
     <Compile Include="placementCalc.py" />
     <Compile Include="VaultPerformanceTracker.py" />
     <Compile Include="sav_fetcher.py" />
     <Compile Include="sav_replacer.py" />
     <Compile Include="TableSorter.py" />
     <Compile Include="virtualvaultmap.py" />
+    <Compile Include="WorkShop.py" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Main.java" />

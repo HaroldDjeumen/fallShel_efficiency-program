@@ -30,7 +30,7 @@ def run(json_path):
     oCounter = 0 
     jCounter = 0
 
-    SPECIAL = ["Luck", "Strength", "Perception", "Intelligence", "Chrisma", "Endurance", "Agility"]
+    SPECIAL = ["Luck", "Strength", "Perception", "Endurance", "Chrisma", "Intelligence", "Agility"]
     delcount = 0
     dwellercount = 0
 
@@ -48,6 +48,8 @@ def run(json_path):
     rooms = data["vault"]["rooms"]
     storItems = data["vault"]["inventory"]["items"]
     outfit_list = []
+    weapon_list = []
+    junk_list = []
 
     print(f"✓ Loaded {len(dwellers_list)} dwellers, {len(rooms)} rooms, {len(storItems)} storage items")
 
@@ -149,6 +151,9 @@ def run(json_path):
         weaponId = weapon.get("id")
         print(f"  Weapon: {weaponId if weaponId else 'None'}")
         
+        if weaponId:
+            weapon_list.append(weaponId)
+
         if outfitId:
             outfit_list.append(outfitId)
 
@@ -222,6 +227,14 @@ def run(json_path):
         if itemType == "Outfit":
             oCounter += 1 
             outfit_list.append(itemId)
+
+        elif itemType == "Weapon":
+            wCounter += 1
+            weapon_list.append(itemId)
+
+        else:
+            jCounter
+            jCounter += 1
     
     print(f"Storage Items Summary:")
     print(f"  Weapons: {wCounter}")

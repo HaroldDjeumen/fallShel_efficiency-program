@@ -71,7 +71,7 @@ if __name__ == "__main__":
                 cycle_duration = time.time() - cycle_start
                 print(f"✓ Cycle #{cycle_count} completed in {cycle_duration:.2f} seconds")
 
-                # Every 5 cycles, analyze and potentially adjust
+                # Every cycles, analyze and potentially adjust
                 if cycle_count % 5 == 0 and cycle_count >= 10:
                     print("\n" + "~"*60)
                     print("Running adaptive analysis...")
