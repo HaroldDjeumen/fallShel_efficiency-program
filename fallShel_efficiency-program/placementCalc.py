@@ -190,14 +190,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
         print(f"{vault_file} not found.")
     except Exception as e:
         print(f"An error occurred: {e}")
-
-    total_rooms = len(geothermal) + len(waterPlant) + len(cafeteria)
-    is_small_vault = total_rooms < 10
-
-    if is_small_vault:
-        print("\n🏠 Small vault detected - using conservative optimization")
-        BALANCE_THRESHOLD = 10.0  
-        MAX_PASSES = 5  
+  
 
     # --- Normalize room lists: remove repeated tiles after merged rooms -------
     def compact_room_list(lst):
@@ -229,6 +222,13 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
     waterPlant = number_duplicates(RoomLists[1])
     cafeteria = number_duplicates(RoomLists[2])
 
+    total_rooms = len(geothermal) + len(waterPlant) + len(cafeteria)
+    is_small_vault = total_rooms < 10
+
+    if is_small_vault:
+        print("\n🏠 Small vault detected - using conservative optimization")
+        BALANCE_THRESHOLD = 10.0  
+        MAX_PASSES = 5
     # --- Read dweller stats once and build fast lookup -------------------------
     Stats = {}
     dweller_stats = {}
@@ -250,6 +250,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
         Stats[serialize_id] = allStats
 
         stat_map_initial = {statname: value + mode for _dwid, statname, value, mode in allStats}
+
         stat_map = {statname: value for _dwid, statname, value, mode in allStats}
         dweller_stats[str(serialize_id)] = stat_map
         dweller_stats_initial[str(serialize_id)] = stat_map_initial
@@ -509,19 +510,21 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
 
         production_time = 0
         pool_percentage = (pool * (modifier/100)) 
-        if room_name in ("Cafeteria"):
+
+        """ if room_name in ("Cafeteria"):
             production_time = ((pool - pool_percentage) / ((total_stat * happiness) + modifier))- total_stat
         elif room_name in ("WaterPlant"):
             production_time = ((pool - pool_percentage) / (total_stat * happiness))- (4 * total_stat)
         elif room_name in ("Geothermal"):
-            production_time = ((pool - pool_percentage) / (total_stat * happiness))- total_stat
+            production_time = ((pool - pool_percentage) / (total_stat * happiness))- total_stat"""
+        production_time = pool/(total_stat * happiness)
 
         return round(production_time, 1)
 
-    def recalc_mean_finder(stats_dict):
+    def recalc_mean_finder(stats_dict, sortList):
         """Recalculate mean_finder with current sortedL assignments"""
         result = {}
-        for room_key, dwellers in sortedL.items():
+        for room_key, dwellers in sortList.items():
             t = get_room_production_time(room_key, dwellers, stats_dict, happiness=vault_happiness / 100)
             if t:
                 result[room_key] = t
@@ -544,7 +547,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
 
     # --- Calculate initial times ---
     print("\nTIME BEFORE ANY CHANGES (INITIAL STATE)")
-    initial_mean_finder = recalc_mean_finder(dweller_stats_initial)
+    initial_mean_finder = recalc_mean_finder(dweller_stats_initial, initial_rooms)
     
     for room_key, t in initial_mean_finder.items():
         level_str = room_key[1]
@@ -572,7 +575,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
         print(f"{room_key} -> {t}s (Tier:{tier}, Merge:{merge_size}x, Mod:{round(modifier, 2)}, {stat}:{total_stat})")
 
     print("\nTIME AFTER INITIAL ASSIGNMENT (BEFORE BALANCING)")
-    before_balancing_times = recalc_mean_finder(dweller_stats)
+    before_balancing_times = recalc_mean_finder(dweller_stats, sortedL)
     
     for room_key, t in before_balancing_times.items():
         print(f"{room_key} -> {t} seconds")
@@ -595,6 +598,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
     print(f"Initial Average Time: {initial_overall_avg}s")
     print(f"Before Balancing Average Time: {before_balance_overall_avg}s")
 
+    initial_used = False
     # Determine which state to use as baseline for balancing
     if initial_overall_avg > 0 and initial_overall_avg < before_balance_overall_avg:
         print(f"\n⚠️  Initial assignment ({initial_overall_avg}s) is BETTER than before balancing ({before_balance_overall_avg}s)")
@@ -604,6 +608,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
             sortedL[room_key] = dwellers.copy()
         working_stats = dweller_stats_initial.copy()
         print(f"    ✓ Balancing will optimize from initial state")
+        initial_used = True
     else:
         print(f"\n✓ Before balancing ({before_balance_overall_avg}s) is better than or equal to initial ({initial_overall_avg}s)")
         print(f"    Using BEFORE BALANCING state as baseline")
@@ -611,7 +616,10 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
 
     # --- Auto-balancing ---
     for pass_num in range(1, MAX_PASSES + 1):
-        mean_finder = recalc_mean_finder(working_stats)
+        if initial_used == False:
+            mean_finder = recalc_mean_finder(working_stats, sortedL)
+        else:
+            mean_finder = recalc_mean_finder(working_stats, initial_rooms)
         geo_mean, wap_mean, caf_mean = group_means(mean_finder)
 
         if not mean_finder:
@@ -691,7 +699,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
         print(f"Room: {room} -> Dwellers: {', '.join(dwellers)}")
     print("")
 
-    after_balancing_times = recalc_mean_finder(working_stats)
+    after_balancing_times = recalc_mean_finder(working_stats, sortedL)
 
     print("\nFINAL TIMES AFTER BALANCING")
     for room_key, t in after_balancing_times.items():
@@ -821,7 +829,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
 
     # Calculate room needs
     room_needs = {}
-    current_times = recalc_mean_finder(dweller_stats_with_outfits)
+    current_times = recalc_mean_finder(dweller_stats_with_outfits, sortedL)
     
     for room_key, prod_time in current_times.items():
         room_type, stat, size = parse_room(room_key)
@@ -1010,7 +1018,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
                 print(f"  ✓ Assigned {outfit['name']} to Dweller {dweller_id} (+{bonus} {stat_needed})")
 
     # Recalculate with outfits
-    mean_finder_with_outfits = recalc_mean_finder(dweller_stats_with_outfits)
+    mean_finder_with_outfits = recalc_mean_finder(dweller_stats_with_outfits, sortedL)
     
     print("\n" + "="*60)
     print("PRODUCTION TIMES WITH OUTFITS")
@@ -1092,21 +1100,18 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
         'performance': {}
     }
     
-
-
-    # Around line 1140 - improve the dweller movement detection
     for dweller in dwellers_list:
         dweller_id = str(dweller.get('serializeId'))
         first_name = dweller.get('name', '')
         last_name = dweller.get('lastName', '')
         full_name = f"{first_name} {last_name}".strip()
-    
+        
         assigned_room = None
         for room_key, dwellers in sortedL.items():
             if dweller_id in dwellers:
                 assigned_room = room_key
                 break
-    
+        
         if assigned_room:
             room_type, stat, size = parse_room(assigned_room)
             assigned_room_info = {
@@ -1116,12 +1121,9 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
                 'room_number': assigned_room[3],
             }
 
-            # IMPROVED: Find previous room by checking if dweller was in ANY initial room
             previous_room_info = None
-            previous_room_key = None
             for room_key, dwellers in initial_rooms.items():
                 if dweller_id in dwellers:
-                    previous_room_key = room_key
                     previous_room_info = {
                         'room_type': room_key[0],
                         'room_level': room_key[1],
@@ -1130,31 +1132,21 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
                     }
                     break
 
-            # IMPROVED: Better movement detection - compare room types and properties
             moved_room_info = None
             if previous_room_info:
-                # Check if ANY property changed (type, level, or size)
-                # We ignore room_number since that's just for tracking multiple same rooms
-                room_changed = (
-                    previous_room_info['room_type'] != assigned_room_info['room_type'] or
-                    previous_room_info['room_level'] != assigned_room_info['room_level'] or
-                    previous_room_info['room_size'] != assigned_room_info['room_size']
+                prev_room_tuple = (
+                    previous_room_info['room_type'],
+                    previous_room_info['room_level'],
+                    previous_room_info['room_size'],
+                    previous_room_info['room_number'],
                 )
-            
-                # Also check if it's literally a different room instance
-                room_number_changed = previous_room_info['room_number'] != assigned_room_info['room_number']
-            
-                if room_changed or room_number_changed:
+                assigned_room_tuple = tuple(assigned_room[:4])
+
+                if assigned_room_tuple != prev_room_tuple:
                     moved_room_info = {
-                        'from': f"{previous_room_info['room_type']}_{previous_room_info['room_level']}_{previous_room_info['room_size']}_{previous_room_info['room_number']}",
-                        'to': f"{assigned_room_info['room_type']}_{assigned_room_info['room_level']}_{assigned_room_info['room_size']}_{assigned_room_info['room_number']}",
+                        'from': f"{prev_room_tuple[0]}_{prev_room_tuple[1]}_{prev_room_tuple[2]}_{prev_room_tuple[3]}",
+                        'to': f"{assigned_room_tuple[0]}_{assigned_room_tuple[1]}_{assigned_room_tuple[2]}_{assigned_room_tuple[3]}",
                     }
-            elif not previous_room_info:
-                # Dweller wasn't in initial_rooms at all - this is a new assignment
-                moved_room_info = {
-                    'from': 'Unassigned/Training',
-                    'to': f"{assigned_room_info['room_type']}_{assigned_room_info['room_level']}_{assigned_room_info['room_size']}_{assigned_room_info['room_number']}",
-                }
 
             dweller_entry = {
                 'id': dweller_id,
@@ -1163,7 +1155,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
                 'previous_room': previous_room_info,
                 'primary_stat': stat,
                 'stat_value': working_stats.get(dweller_id, {}).get(stat, 0),
-                'dweller_moved': moved_room_info  # This will now be populated correctly
+                'dweller_moved': moved_room_info
             }
 
             # Add outfit info if assigned
@@ -1179,9 +1171,6 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
                 }
 
             optimization_results['dweller_assignments'].append(dweller_entry)
-
-
-
 
     # Save room assignments
     for room_key, dwellers in sortedL.items():
@@ -1225,7 +1214,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None):
     from VaultPerformanceTracker import VaultPerformanceTracker
     tracker = VaultPerformanceTracker(vault_name)
     tracker.add_cycle_data(
-        initial_avg=optimization_results['performance']['initial_avg'],
+        initial_avg=optimization_results['performance']['initial_avg'], 
         before_balance_avg=optimization_results['performance']['before_balance_avg'],
         after_balance_avg=optimization_results['performance']['after_balance_avg'],
         with_outfits_avg=optimization_results['performance']['with_outfits_avg']
