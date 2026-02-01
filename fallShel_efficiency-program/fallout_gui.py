@@ -14,6 +14,8 @@ import matplotlib.pyplot as plt
 
 from placementCalc import NULL
 from outfit_manager import OutfitDatabaseManager
+from version import __version__ as APP_VERSION
+import updater
 
 # Thread for running optimization cycles
 class OptimizationThread(QThread):
@@ -253,7 +255,7 @@ class PerformanceChart(FigureCanvas):
         
         if not history['timestamps']:
             return
-        
+            
         # Convert timestamps to datetime objects
         dates = [datetime.fromisoformat(ts) for ts in history['timestamps']]
         
@@ -284,6 +286,21 @@ class PerformanceChart(FigureCanvas):
         self.fig.tight_layout()
         self.draw()
 
+
+class UpdateCheckThread(QThread):
+    finished_signal = Signal(dict)
+    def __init__(self, current_version: str, repo: str, asset_match: str = "win"):
+        super().__init__()
+        self.current_version = current_version
+        self.repo = repo
+        self.asset_match = asset_match
+    def run(self):
+        try:
+            result = updater.check_for_update(self.current_version, self.repo, asset_name_match=self.asset_match)
+        except Exception as e:
+            result = {'update_available': False, 'latest_version': None, 'downloaded_installer': None, 'error': str(e)}
+        self.finished_signal.emit(result)
+    
 
 class FalloutShelterGUI(QMainWindow):
     def __init__(self):
@@ -479,6 +496,11 @@ class FalloutShelterGUI(QMainWindow):
         self.stop_btn.clicked.connect(self.stop_optimization)
         self.stop_btn.setEnabled(False)
         control_layout.addWidget(self.stop_btn)
+        
+        # Add check for updates button
+        self.check_updates_btn = QPushButton("⬆️ CHECK FOR UPDATES")
+        self.check_updates_btn.clicked.connect(self.check_updates_action)
+        control_layout.addWidget(self.check_updates_btn)
         
         control_group.setLayout(control_layout)
         layout.addWidget(control_group)
@@ -1027,7 +1049,7 @@ class FalloutShelterGUI(QMainWindow):
         
             # Get timestamp for this cycle
             timestamp = history['timestamps'][cycle_num]
-            date_str = datetime.fromisoformat(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+            date_str = datetime.fromisoformat(timestamp).strftime('%Y-%m-%d %H:%M:%S');
         
             # Create figure for this cycle showing the progression
             fig = Figure(figsize=(10, 5), facecolor='#2b2b2b')
@@ -1105,6 +1127,35 @@ class FalloutShelterGUI(QMainWindow):
             self.stats_display = scroll
     
         self.log(f"📊 Final report generated with {stats['total_cycles']} cycle graphs")
+
+    def check_updates_action(self):
+        repo = "HaroldDjeumen/fallShel_efficiency-program"  # change if repo differs
+        self.log("Checking for updates...", "#48dbfb")
+        self.update_thread = UpdateCheckThread(APP_VERSION, repo, asset_match="win")
+        self.update_thread.finished_signal.connect(self.on_update_check_finished)
+        self.update_thread.start()
+
+    def on_update_check_finished(self, result: dict):
+        if result.get('error'):
+            self.log(f"Update check failed: {result['error']}", "#ff0000")
+            QMessageBox.warning(self, "Update Check Failed", f"Failed to check for updates:\n{result['error']}", QMessageBox.Ok)
+            return
+        if not result.get('update_available'):
+            self.log("No update available. You are on the latest version.", "#1dd1a1")
+            QMessageBox.information(self, "No Update", "No update available. You are on the latest version.", QMessageBox.Ok)
+            return
+        installer = result.get('downloaded_installer')
+        latest = result.get('latest_version')
+        self.log(f"Update available: {latest}. Installer downloaded to {installer}", "#ffcc00")
+        resp = QMessageBox.question(self, "Update available", f"Version {latest} is available. Install now?", QMessageBox.Yes | QMessageBox.No)
+        if resp == QMessageBox.Yes and installer:
+            try:
+                updater.run_installer(installer)
+                self.log("Installer launched. Exiting application to allow install.", "#ffcc00")
+                QApplication.quit()
+            except Exception as e:
+                self.log(f"Failed to launch installer: {e}", "#ff0000")
+                QMessageBox.critical(self, "Install Failed", f"Failed to launch installer:\n{e}", QMessageBox.Ok)
 
 
 def main():

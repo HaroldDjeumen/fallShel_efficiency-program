@@ -26,10 +26,12 @@
     <Compile Include="fallout_gui.py" />
     <Compile Include="outfit_manager.py" />
     <Compile Include="placementCalc.py" />
+    <Compile Include="updater.py" />
     <Compile Include="VaultPerformanceTracker.py" />
     <Compile Include="sav_fetcher.py" />
     <Compile Include="sav_replacer.py" />
     <Compile Include="TableSorter.py" />
+    <Compile Include="version.py" />
     <Compile Include="virtualvaultmap.py" />
     <Compile Include="WorkShop.py" />
   </ItemGroup>

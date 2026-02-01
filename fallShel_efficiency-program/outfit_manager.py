@@ -1,9 +1,20 @@
+import os
+import sys
+import shutil
 import sqlite3
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                                QLineEdit, QComboBox, QPushButton, QMessageBox,
                                QGroupBox, QFormLayout)
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
+
+def resource_path(relative_path: str):
+    """Return absolute path to resource, works for dev and for PyInstaller onefile."""
+    if getattr(sys, "frozen", False):
+        base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, relative_path)
 
 
 class OutfitEntryDialog(QDialog):
@@ -20,7 +31,7 @@ class OutfitEntryDialog(QDialog):
         self.setMinimumWidth(500)
         
         # Apply Fallout theme
-        self.setStyleSheet("""
+        self.setStyleSheet("""        
             QDialog {
                 background-color: #1a1a1a;
             }
@@ -216,8 +227,57 @@ class OutfitEntryDialog(QDialog):
 class OutfitDatabaseManager:
     """Manages outfit database operations including missing outfit detection"""
     
-    def __init__(self, db_path="vault.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None):
+        """
+        If db_path is None the bundled `vault.db` will be copied to a per-user writable
+        location (APPDATA) on first run and that writable copy is used. This allows the
+        exe produced by PyInstaller (--onefile) to bundle the DB while letting the app
+        write to a safe location at runtime.
+        """
+        if db_path:
+            self.db_path = db_path
+            return
+
+        # Path to bundled DB inside the package or _MEIPASS (when frozen)
+        bundled_db = resource_path("vault.db")
+
+        # Choose a writable per-user location for the runtime DB copy
+        appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
+        user_dir = os.path.join(appdata, "fallShel_efficiency_program")
+        os.makedirs(user_dir, exist_ok=True)
+        user_db = os.path.join(user_dir, "vault.db")
+
+        # If bundled DB exists and user copy is missing, copy it
+        if os.path.exists(bundled_db) and not os.path.exists(user_db):
+            try:
+                shutil.copy2(bundled_db, user_db)
+            except Exception:
+                # If copy fails, fall back to using bundled path (read-only)
+                self.db_path = bundled_db
+            else:
+                self.db_path = user_db
+        elif os.path.exists(user_db):
+            self.db_path = user_db
+        elif os.path.exists(bundled_db):
+            # No writable copy possible, use bundled DB (read-only)
+            self.db_path = bundled_db
+        else:
+            # No DB available — create a new empty DB in user_dir
+            self.db_path = user_db
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            # Minimal schema to avoid runtime crashes; adapt as needed
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS Outfit (
+                    Name TEXT,
+                    `Item ID` TEXT PRIMARY KEY,
+                    S INTEGER, P INTEGER, E INTEGER, C INTEGER, I INTEGER, A INTEGER, L INTEGER,
+                    Sex TEXT,
+                    `RARITY / WORNBY` TEXT
+                )
+            """)
+            conn.commit()
+            conn.close()
         
     def get_outfit_data(self, outfit_id):
         """Retrieve outfit data from database"""
