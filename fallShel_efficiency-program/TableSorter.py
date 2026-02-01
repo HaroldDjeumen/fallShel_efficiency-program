@@ -72,7 +72,7 @@ def run(json_path):
         print("✓ No cleanup needed - all dwellers current")
 
     # Clear working tables
-    tables = ["Stats", "TrainingRoom", "CraftingRoom", "ConsumableRoom", "Non_ProductionRoom", "ProductionRoom"]
+    tables = ["Stats", "TrainingRoom", "CraftingRoom", "Non_ProductionRoom", "ProductionRoom"]
     for t in tables:
         cursor.execute(f"DELETE FROM {t}")
     conn.commit()
@@ -80,7 +80,7 @@ def run(json_path):
 
     table_map = {
         "Production": "ProductionRoom",
-        "Consumable": "ConsumableRoom",
+        "Consumable": "ProductionRoom",
         "Crafting": "CraftingRoom",
         "Training": "TrainingRoom"
     }

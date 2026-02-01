@@ -5,7 +5,7 @@ from datetime import datetime
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QPushButton, QLabel, QTextEdit, 
                                QLineEdit, QGroupBox, QListWidget, QTabWidget,
-                               QProgressBar, QScrollArea, QFrame, QSplitter)
+                               QProgressBar, QScrollArea, QFrame, QSplitter, QMessageBox)
 from PySide6.QtCore import QThread, Signal, Qt, QTimer
 from PySide6.QtGui import QFont, QPalette, QColor, QPixmap
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -13,6 +13,7 @@ from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 
 from placementCalc import NULL
+from outfit_manager import OutfitDatabaseManager
 
 # Thread for running optimization cycles
 class OptimizationThread(QThread):
@@ -20,10 +21,12 @@ class OptimizationThread(QThread):
     error_occurred = Signal(str)
     # accept any Python object (str path, dict, or list) from the worker
     dweller_suggestions = Signal(dict)
+    missing_outfits_found = Signal(list)  # Signal for missing outfits
     
     def __init__(self, vault_name, outfit_list):
         super().__init__()
         self.vault_name = vault_name
+        self.outfit_list = outfit_list
         self.running = True
         self.cycle_count = 0
         
@@ -49,6 +52,21 @@ class OptimizationThread(QThread):
                 # Run cycle
                 json_path = sav_fetcher.run(self.vault_name)
                 outfitlist = TableSorter.run(json_path)
+                
+                # Check for missing outfits
+                outfit_manager = OutfitDatabaseManager()
+                missing = outfit_manager.check_missing_outfits(outfitlist)
+                
+                if missing and self.cycle_count == 1:  # Only check on first cycle
+                    self.missing_outfits_found.emit(missing)
+                    # Pause thread until user handles missing outfits
+                    while missing:
+                        time.sleep(0.5)
+                        # Recheck to see if they've been added
+                        missing = outfit_manager.check_missing_outfits(outfitlist)
+                        if not self.running:
+                            return
+                
                 virtualvaultmap.run(json_path)
                 
                 # Capture suggestions or results file from placementCalc
@@ -145,8 +163,8 @@ class ProductionBarChart(FigureCanvas):
                             key=lambda x: (x[1]['room_type'], x[1]['number']))
         
         for room_id, room_data in sorted_rooms:
-            # Skip training rooms
-            if room_data['room_type'] in ['Gym', 'Armory', 'Dojo']:
+            # Skip training rooms (including Classroom)
+            if room_data['room_type'] in ['Gym', 'Armory', 'Dojo', 'Classroom']:
                 continue
             
             room_label = f"{room_data['room_type']}-{room_data['level']}-{room_data['size']}-{room_data['number']}"
@@ -280,6 +298,7 @@ class FalloutShelterGUI(QMainWindow):
         self.optimization_thread = None
         self.vault_name = None
         self.is_running = False
+        self.outfit_manager = OutfitDatabaseManager()
         
         # Setup UI
         self.setup_ui()
@@ -441,7 +460,7 @@ class FalloutShelterGUI(QMainWindow):
         vault_input_layout = QHBoxLayout()
         vault_input_layout.addWidget(QLabel("Vault Number:"))
         self.vault_input = QLineEdit()
-        self.vault_input.setPlaceholderText("Enter vault number (e.g., 2)")
+        self.vault_input.setPlaceholderText("Enter number ")
         vault_input_layout.addWidget(self.vault_input)
         vault_layout.addLayout(vault_input_layout)
         
@@ -475,9 +494,15 @@ class FalloutShelterGUI(QMainWindow):
         self.cycle_label = QLabel("Cycles Completed: 0")
         status_layout.addWidget(self.cycle_label)
         
+        # Countdown timer label
+        self.countdown_label = QLabel("Next cycle in: --")
+        self.countdown_label.setStyleSheet("color: #48dbfb; font-size: 11px;")
+        status_layout.addWidget(self.countdown_label)
+        
         self.progress_bar = QProgressBar()
-        self.progress_bar.setMaximum(60)
+        self.progress_bar.setMaximum(100)  # Changed from 60 to 100 for percentage
         self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("%p%")  # Show percentage
         status_layout.addWidget(self.progress_bar)
         
         status_group.setLayout(status_layout)
@@ -593,6 +618,28 @@ class FalloutShelterGUI(QMainWindow):
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.log_console.append(f'<span style="color:{color}">[{timestamp}] {message}</span>')
     
+    def handle_missing_outfits(self, missing_outfit_ids):
+        """Handle missing outfit data by prompting user"""
+        self.log(f"⚠ Found {len(missing_outfit_ids)} missing outfit(s) in database", "#ff6b6b")
+        
+        success, failed, cancelled = self.outfit_manager.prompt_for_missing_outfits(
+            missing_outfit_ids, parent=self
+        )
+        
+        if cancelled:
+            self.log("⚠ Outfit entry cancelled by user", "#ff6b6b")
+            QMessageBox.warning(
+                self,
+                "Optimization Cancelled",
+                "Outfit data entry was cancelled. Optimization cannot continue without complete outfit data.",
+                QMessageBox.Ok
+            )
+            self.stop_optimization()
+        elif failed > 0:
+            self.log(f"⚠ Failed to add {failed} outfit(s)", "#ff6b6b")
+        else:
+            self.log(f"✓ Successfully added {success} outfit(s) to database", "#1dd1a1")
+    
     def start_optimization(self):
         """Start optimization thread"""
         vault_num = self.vault_input.text().strip()
@@ -617,6 +664,7 @@ class FalloutShelterGUI(QMainWindow):
         self.optimization_thread.cycle_complete.connect(self.on_cycle_complete)
         self.optimization_thread.error_occurred.connect(self.on_error)
         self.optimization_thread.dweller_suggestions.connect(self.update_suggestions)
+        self.optimization_thread.missing_outfits_found.connect(self.handle_missing_outfits)
         self.optimization_thread.start()
         
         # Start chart updates
@@ -628,6 +676,10 @@ class FalloutShelterGUI(QMainWindow):
             self.log("⏹ Stopping optimization...", "#ffcc00")
             self.optimization_thread.stop()
             self.optimization_thread.wait()
+        
+        # Stop countdown timer
+        if hasattr(self, 'countdown_timer'):
+            self.countdown_timer.stop()
             
         self.is_running = False
         self.status_label.setText("Status: STOPPED")
@@ -648,8 +700,42 @@ class FalloutShelterGUI(QMainWindow):
         self.cycle_label.setText(f"Cycles Completed: {cycle_num}")
         self.log(f"✓ Cycle #{cycle_num} completed at {stats['timestamp']}")
         
-        # Update progress bar (simulated countdown)
+        # Reset and start countdown progress bar
         self.progress_bar.setValue(0)
+        self.start_countdown_timer()
+    
+    def start_countdown_timer(self):
+        """Start a 60-second countdown timer that updates the progress bar"""
+        self.countdown_seconds = 0
+        
+        # Create a timer that fires every second
+        if not hasattr(self, 'countdown_timer'):
+            self.countdown_timer = QTimer()
+            self.countdown_timer.timeout.connect(self.update_countdown)
+        
+        self.countdown_timer.start(1000)  # Update every 1 second
+    
+    def update_countdown(self):
+        """Update progress bar during countdown"""
+        if not self.is_running:
+            self.countdown_timer.stop()
+            return
+        
+        self.countdown_seconds += 1
+        
+        # Calculate progress (0-60 seconds = 0-100%)
+        progress = int((self.countdown_seconds / 60) * 100)
+        self.progress_bar.setValue(min(progress, 100))
+        
+        # Update countdown label
+        remaining = 60 - self.countdown_seconds
+        self.countdown_label.setText(f"Next cycle in: {remaining}s")
+        
+        # Stop timer after 60 seconds
+        if self.countdown_seconds >= 60:
+            self.countdown_timer.stop()
+            self.countdown_seconds = 0
+            self.countdown_label.setText("Next cycle in: Processing...")
     
     def on_error(self, error_msg):
         """Handle errors"""
@@ -704,92 +790,178 @@ class FalloutShelterGUI(QMainWindow):
             self.suggestions_list.setHtml(f'<span style="color:#ff0000; font-size: 20px;">Error: {str(e)}</span>')
             return
         
-        # Build HTML display
-        html = '<div style="font-family: Consolas; color: #00ff00;">'
-        html += '<h2 style="color: #ffcc00; border-bottom: 3px solid #00ff00; font-size: 24px; padding-bottom: 10px;">📋 RECOMMENDED ACTIONS</h2>'
-        
-        # Create two-column layout
-        html += '<div style="display: flex; gap: 30px; margin-top: 20px;">'
 
-        # LEFT COLUMN - Dweller Room Assignments
-        html += '<div style="flex: 1; padding-right: 15px; border-right: 3px solid #00ff00;">'
-        html += '<h3 style="color: #ffcc00; margin-top: 0; font-size: 22px;">👥 DWELLER ROOM ASSIGNMENTS:</h3>'
-        
-        
+        # Build HTML display with improved UI
+        html = '<div style="font-family: Consolas; color: #00ff00; padding: 20px;">'
 
-        # Around line 530 in FalloutShelterGUI.py - improve the display logic
-        for mo in dweller_assigns:
-            name = mo.get("name")
-            id = mo.get("id")
-            prev = mo.get("previous_room", {})
-            new = mo.get("assigned_room", {})
-            primary = mo.get("primary_stat")
-            stat = mo.get("stat_value")
-
-            # Format new room assignment
-            new_room = f"{new.get('room_type')}-{new.get('room_level')}-{new.get('room_size')}-{new.get('room_number')}"
-    
-            # ONLY show dwellers who actually moved
-            if mo.get("dweller_moved") is not None:
-                html += f'<div style="background-color: #2a2a2a; padding: 15px; margin-bottom: 15px; border-left: 6px solid #ff6b6b; border-radius: 5px; border-bottom: 2px solid #444;">'
-                html += f'<p style="margin: 5px 0; font-size: 20px;"><strong style="color: #ffcc00;">📍 {name}</strong> <span style="color: #888888; font-size: 18px;">(ID: {id})</span></p>'
-        
-                # Show the movement
-                move_info = mo.get("dweller_moved")
-                html += f'<p style="margin: 5px 0; font-size: 20px;"><strong style="color: #ff6b6b;">FROM:</strong> <span style="color: #ffffff;">{move_info["from"]}</span></p>'
-                html += f'<p style="margin: 5px 0; font-size: 20px;"><strong style="color: #1dd1a1;">➡️ TO:</strong> <span style="color: #ffffff;">{move_info["to"]}</span></p>'
-
-                # Show primary stat
-                if 'primary_stat' in mo:
-                    html += f'<p style="margin: 5px 0; font-size: 18px; color: #48dbfb;">⭐ Primary Stat: {primary} ({stat})</p>'
-
-                html += '</div>'
-
-
-        html += '</div>'  # End left column
-        
-
-        # RIGHT COLUMN - Outfit Assignments
-        html += '<div style="flex: 1; padding-left: 15px;">'
-        html += '<h3 style="color: #ffcc00; margin-top: 0; font-size: 22px;">👔 OUTFIT ASSIGNMENTS:</h3>'
-
-        # Extract dwellers who have outfit assignments
+        # Header with summary
+        dwellers_moved = [d for d in dweller_assigns if d.get("dweller_moved") is not None]
         dwellers_with_outfits = [d for d in dweller_assigns if 'outfit' in d and d['outfit']]
+
+        html += '<div style="padding: 20px; border-radius: 10px; border: 3px solid #ffcc00; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">'
+        html += '<h1 style="color: #ffcc00; margin: 0 0 15px 0; font-size: 32px; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">📋 DWELLER OPTIMIZATION REPORT</h1>'
+        html += '<div style="display: flex; gap: 20px; justify-content: space-around;">'
+        html += f'<div style="text-align: center; flex: 1; padding: 15px; border-radius: 8px; border: 2px solid #ff6b6b;">'
+        html += f'<div style="font-size: 42px; color: #ff6b6b; font-weight: bold;">{len(dwellers_moved)}</div>'
+        html += f'<div style="font-size: 16px; color: #cccccc; margin-top: 5px;">ROOM MOVES</div>'
+        html += '</div>'
+        html += f'<div style="text-align: center; flex: 1; padding: 15px; border-radius: 8px; border: 2px solid #1dd1a1;">'
+        html += f'<div style="font-size: 42px; color: #1dd1a1; font-weight: bold;">{len(dwellers_with_outfits)}</div>'
+        html += f'<div style="font-size: 16px; color: #cccccc; margin-top: 5px;">OUTFIT CHANGES</div>'
+        html += '</div>'
+        html += f'<div style="text-align: center; flex: 1; padding: 15px; border-radius: 8px; border: 2px solid #48dbfb;">'
+        html += f'<div style="font-size: 42px; color: #48dbfb; font-weight: bold;">{len(dweller_assigns)}</div>'
+        html += f'<div style="font-size: 16px; color: #cccccc; margin-top: 5px;">TOTAL ACTIONS</div>'
+        html += '</div>'
+        html += '</div>'
+        html += '</div>'
+
+        # Tabbed sections
+        html += '<div style="margin-top: 20px;">'
+
+        # SECTION 1: Room Assignments
+        html += '<div style=" border: 2px solid #ff6b6b; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">'
+        html += '<div style="color: #ff6b6b; margin: 0 0 20px 0; font-size: 28px; border-bottom: 3px solid #ff6b6b; padding-bottom: 10px; display: flex; align-items: center;">'
+        html += '<span style="font-size: 36px; margin-right: 10px;">🏠</span> ROOM ASSIGNMENTS'
+        html += '</div>'
+
+        if dwellers_moved:
+            # Group by room type for easier tracking
+            moves_by_room = {}
+            for mo in dwellers_moved:
+                move_info = mo.get("dweller_moved")
+                to_room = move_info["to"]
+                if to_room not in moves_by_room:
+                    moves_by_room[to_room] = []
+                moves_by_room[to_room].append(mo)
+    
+            for room, dwellers in sorted(moves_by_room.items()):
+                # Room header
+                html += f'<div style=" padding: 10px 15px; margin-top: 30px; border-radius: 8px; border-left: 5px solid #feca57;">'
+                html += f'<div style="color: #feca57; margin-top: 50; font-size: 24px;">🎯 {room}</div>'
+                html += f'<hr style="border: none; height: 3px; background: linear-gradient(to right, transparent, #ffcc00, transparent); margin: 5px 0;">'
+                html += '</div>'
+        
+                for mo in dwellers:
+                    name = mo.get("name")
+                    id = mo.get("id")
+                    move_info = mo.get("dweller_moved")
+                    primary = mo.get("primary_stat")
+                    stat = mo.get("stat_value")
+            
+                    html += f'<div style=" padding: 15px; margin-bottom: 30px; margin-left: 20px; border-radius: 8px; border-left: 4px solid #00ff00; position: relative;">'
+            
+                    # Dweller name and ID
+                    html += f'<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">'
+                    html += f'<div style="font-size: 24px; color: #ffcc00; font-weight: bold; margin-top: 15;">👤 {name}</div>'
+                    html += f'<div style=" padding: 5px 12px; border-radius: 15px; font-size: 16px; color: #888888;">ID: {id}</div>'
+                    html += '</div>'
+            
+                    # Movement path with arrow
+                    html += '<div style=" padding: 12px; border-radius: 6px; margin-bottom: 10px;">'
+                    html += '<table style="width: 100%; border-collapse: collapse;">'
+                    html += '<tr>'
+                    html += f'<td style="padding: 8px;  border: 2px solid #ff6b6b; border-radius: 5px; width: 45%; color: #ffffff; font-size: 18px;"><strong style="color: #ff6b6b;">FROM:</strong><br>{move_info["from"]}</td>'
+                    html += '<td style="text-align: center; width: 10%; font-size: 28px; color: #00ff00;">➜</td>'
+                    html += f'<td style="padding: 8px; border: 2px solid #1dd1a1; border-radius: 5px; width: 45%; color: #ffffff; font-size: 18px;"><strong style="color: #1dd1a1;">TO:</strong><br>{move_info["to"]}</td>'
+                    html += '</tr>'
+                    html += '</table>'
+                    html += '</div>'
+            
+                    # Primary stat info
+                    if primary and stat:
+                        stat_colors = {
+                            'Strength': '#ff6b6b',
+                            'Perception': '#feca57',
+                            'Endurance': '#ee5a6f',
+                            'Charisma': '#ff69b4',
+                            'Intelligence': '#48dbfb',
+                            'Agility': '#1dd1a1',
+                            'Luck': '#ffd700'
+                        }
+                        stat_color = stat_colors.get(primary, '#48dbfb')
+                        html += f'<div style="display: inline-block; background-color: {stat_color}22; padding: 8px 14px; border-radius: 15px; border: 2px solid {stat_color};">'
+                        html += f'<span style="color: {stat_color}; font-weight: bold; font-size: 16px;">⭐ {primary}: {stat}</span>'
+                        html += '</div>'
+            
+                    html += '</div>'
+                    html += '</div><div style="margin-bottom: 30px;"></div>'
+
+        else:
+            html += '<p style="text-align: center; font-size: 20px; color: #888888; padding: 40px;">✓ No room reassignments needed</p>'
+
+        html += '</div>'  # End Room Assignments section
+        html += '</div><div style="margin-bottom: 15px;"></div>'
+
+
+        # SECTION 2: Outfit Assignments
+        html += '<div style="border: 2px solid #1dd1a1; border-radius: 10px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">'
+        html += '<div style="color: #1dd1a1; margin: 0 40px 20px 0; font-size: 28px; border-bottom: 3px solid #1dd1a1; padding-bottom: 10px; display: flex; align-items: center;">'
+        html += '<span style="font-size: 36px; margin-right: 10px;">👔</span> OUTFIT ASSIGNMENTS'
+        html += '</div>'
 
         if dwellers_with_outfits:
             for dweller in dwellers_with_outfits:
                 outfit = dweller['outfit']
-                stats_text = f"S+{outfit.get('strength_bonus', 0)}, P+{outfit.get('perception_bonus', 0)}, A+{outfit.get('agility_bonus', 0)}"
+                name = dweller.get("name", "Unknown")
+                id = dweller.get("id", "?")
+        
+                # Determine primary stat bonus and color
+                strength_bonus = outfit.get('strength_bonus', 0)
+                perception_bonus = outfit.get('perception_bonus', 0)
+                agility_bonus = outfit.get('agility_bonus', 0)
+        
+                # Choose color based on highest bonus
+                if strength_bonus >= perception_bonus and strength_bonus >= agility_bonus and strength_bonus > 0:
+                    border_color = '#ff6b6b'  # Red for Strength
+                elif perception_bonus >= agility_bonus and perception_bonus > 0:
+                    border_color = '#feca57'  # Yellow for Perception
+                elif agility_bonus > 0:
+                    border_color = '#1dd1a1'  # Green for Agility
+                else:
+                    border_color = '#888888'  # Gray for no bonuses
+        
+                # Build stats display
+                stats = []
+                if strength_bonus > 0:
+                    stats.append(f'<span style="color: #ff6b6b;">S+{strength_bonus}</span>')
+                if perception_bonus > 0:
+                    stats.append(f'<span style="color: #feca57;">P+{perception_bonus}</span>')
+                if agility_bonus > 0:
+                    stats.append(f'<span style="color: #1dd1a1;">A+{agility_bonus}</span>')
+                stats_text = ' | '.join(stats) if stats else 'No bonuses'
 
-                html += f'<div style="background-color: #2a2a2a; padding: 15px; margin-bottom: 15px; border-left: 6px solid #1dd1a1; border-radius: 5px; border-bottom: 2px solid #444;">'
-                html += f'<p style="margin: 5px 0; font-size: 20px;"><strong style="color: #ffcc00;">📍 {dweller.get("name", "Unknown")}</strong> <span style="color: #888888; font-size: 18px;">(ID: {dweller.get("id", "?")})</span></p>'
-                html += f'<p style="margin: 5px 0; font-size: 20px;"><strong style="color: #1dd1a1;">➡️ EQUIP:</strong> <span style="color: #ffffff;">{outfit.get("outfit_name", "Unknown")}</span></p>'
-                html += f'<p style="margin: 5px 0; font-size: 20px;"><strong style="color: #48dbfb;">BONUSES:</strong> <span style="color: #ffffff;">{stats_text}</span></p>'
-
-                # Show current room from dweller's assigned_room
+                # Create card with colored border - FIXED VERSION
+                html += f'<hr style="border: none; height: 3px; background-color:{border_color}; margin: 5px 0;">'
+        
+                # Dweller name and ID
+                html += f'<div style="font-size: 24px; color: #ffcc00; font-weight: bold; margin-bottom: 5px; margin-top: 20px;">{name}</div>'
+                html += f'<div style="font-size: 14px; color: #888888; margin-bottom: 5px;">ID: {id}</div>'
+        
+                # Stat bonus
+                html += f'<div style="font-size: 18px; color: {border_color}; font-weight: bold; margin-bottom: 5px;">{stats_text}</div>'
+        
+                # Outfit name
+                html += f'<div style="font-size: 18px; color: #ffffff; margin-bottom: 15px;"><strong>Outfit name:</strong> {outfit.get("outfit_name", "Unknown")}</div>'
+        
+                # Location
                 assigned_room = dweller.get('assigned_room', {})
                 current_room = f"{assigned_room.get('room_type', '?')}-{assigned_room.get('room_level', '?')}-{assigned_room.get('room_size', '?')}-{assigned_room.get('room_number', '?')}"
-                html += f'<p style="margin: 5px 0; font-size: 18px;"><strong style="color: #feca57;">Dweller Location:</strong> <span style="color: #ffffff;">{current_room}</span></p>'
+                html += f'<div style="font-size: 18px; color: #ffffff;"><strong>Location:</strong> {current_room}</div>'
 
-                # Show if outfit needs to be taken from someone
+                # Warning if needs to remove from someone
                 if outfit.get('previous_owner'):
                     prev_owner = outfit['previous_owner']
-                    html += f'<p style="margin: 5px 0; font-size: 18px; color: #ff6b6b;">⚠️ First, remove from: {prev_owner.get("dweller_name", "Unknown")} (ID: {prev_owner.get("dweller_id", "?")})</p>'
-
+                    html += f'<div style="background-color: #ff6b6b22; padding: 10px 12px; border-radius: 5px; border: 2px solid #ff6b6b; margin-top: 15px;">'
+                    html += f'<span style="color: #ff6b6b; font-weight: bold; font-size: 16px;">⚠️ FIRST REMOVE FROM:</span> <span style="color: #ffffff; font-size: 16px;">{prev_owner.get("dweller_name", "Unknown")} (ID: {prev_owner.get("dweller_id", "?")})</span>'
+                    html += '</div>'
+                html += f'<hr style="border: none; height: 3px; background-color:{border_color}; margin: 5px 0;">'
                 html += '</div>'
         else:
-            html += '<p style="font-size: 20px; color: #aaaaaa; margin: 10px 0;">No outfit changes needed.</p>'
+            html += '<p style="text-align: center; font-size: 20px; color: #888888; padding: 40px;">✓ No outfit changes needed</p>'
 
-        html += '</div>'  # End right column
-        html += '</div>'  # End two-column layout
-        
-        # Summary
-        html += f'<div style="background-color: #333333; padding: 15px; margin-top: 30px; border: 3px solid #ffcc00; border-radius: 5px;">'
-        html += f'<p style="margin: 5px 0; color: #ffcc00; font-size: 22px;"><strong>📊 TOTAL ACTIONS:</strong></p>'
-        html += f'<p style="margin: 5px 0; font-size: 20px;">• <strong>{len(dweller_assigns)}</strong> dweller room assignments</p>'
-        html += f'<p style="margin: 5px 0; font-size: 20px;">• <strong>{len(dwellers_with_outfits)}</strong> outfit assignments</p>'
-        html += '</div>'
-
+        html += '</div>'  # End Outfit Assignments section
+        html += '</div>'  # End main container
         html += '</div>'
         
         self.suggestions_list.setHtml(html)

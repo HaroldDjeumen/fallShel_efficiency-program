@@ -24,6 +24,7 @@
     <Compile Include="AdaptiveVaultOptimizer.py" />
     <Compile Include="fallShel_efficiency_program.py" />
     <Compile Include="fallout_gui.py" />
+    <Compile Include="outfit_manager.py" />
     <Compile Include="placementCalc.py" />
     <Compile Include="VaultPerformanceTracker.py" />
     <Compile Include="sav_fetcher.py" />
