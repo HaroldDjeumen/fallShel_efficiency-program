@@ -12,8 +12,6 @@ from outfit_manager import OutfitDatabaseManager
 
 
 class SwapLogger:
-    """Detailed logging and analysis for each swap operation"""
-    
     def __init__(self, vault_happiness):
         self.vault_happiness = vault_happiness
         self.swap_history = []
@@ -21,7 +19,6 @@ class SwapLogger:
         
     def log_swap(self, dweller1_id, dweller2_id, room1_key, room2_key, 
                  before_times, after_times, dweller_stats, reason=""):
-        """Log a swap with detailed before/after analysis"""
         self.swap_count += 1
         
         swap_record = {
@@ -42,17 +39,14 @@ class SwapLogger:
         self._print_swap_details(swap_record, dweller_stats, room1_key, room2_key)
         
     def _format_room(self, room_key):
-        """Format room key for display"""
         return f"{room_key[0]}_{room_key[1]}_{room_key[2]}_{room_key[3]}"
     
     def _calculate_improvement(self, before_times, after_times, room1_key, room2_key):
-        """Calculate total time improvement from swap"""
         before_total = (before_times.get(room1_key, 0) + before_times.get(room2_key, 0))
         after_total = (after_times.get(room1_key, 0) + after_times.get(room2_key, 0))
         return round(before_total - after_total, 2)
     
     def _print_swap_details(self, record, dweller_stats, room1_key, room2_key):
-        """Print detailed information about the swap"""
         print(f"\n{'='*80}")
         print(f"SWAP #{record['swap_number']}: {record['reason']}")
         print(f"{'='*80}")
@@ -89,7 +83,6 @@ class SwapLogger:
         print(f"\nOverall Improvement: {record['improvement']}s")
         
     def _parse_room(self, room_key):
-        """Parse room key to extract type, stat, and size"""
         ROOM_STAT_MAP = {
             "Geothermal": "Strength",
             "Energy2": "Strength",
@@ -98,7 +91,8 @@ class SwapLogger:
             "Cafeteria": "Agility",
             "Hydroponic": "Agility",
             "MedBay": "Intelligence",
-            "ScienceLab": "Intelligence"
+            "ScienceLab": "Intelligence",
+            "NukaCola": "Perception+Agility"  
         }
         
         code = room_key[0]
@@ -113,14 +107,14 @@ class SwapLogger:
             "Cafeteria": "Food",
             "Hydroponic": "Food2",
             "MedBay": "Medbay",
-            "ScienceLab": "Medbay"
+            "ScienceLab": "Medbay",
+            "NukaCola": "NukaCola"
         }
         
         room_type = ROOM_CODE_MAP.get(code)
         return room_type, stat, size
     
     def print_summary(self):
-        """Print summary of all swaps"""
         print(f"\n{'='*80}")
         print(f"SWAP SUMMARY - Total Swaps: {self.swap_count}")
         print(f"{'='*80}")
@@ -135,13 +129,11 @@ class SwapLogger:
                   f"({min(s['improvement'] for s in self.swap_history)}s improvement)")
 
 
-class BalancingConfig:
-    """Configuration for balancing priorities and strategies"""
-    
-    def __init__(self):
+class BalancingConfig: 
+    def __init__(self, optimizer_params = None):
         # Default priority: Intelligence (Medbay) > Others
         self.room_priorities = {
-            'Medbay': 1,  # Highest priority
+            'Medbay': 1,
             'Power': 2,
             'Power2': 2,
             'Water': 3,
@@ -150,16 +142,30 @@ class BalancingConfig:
             'Food2': 4
         }
         
-        self.balance_threshold = 5.0
-        self.max_passes = 10
-        self.enable_cross_stat_balancing = True
+        # Apply optimizer parameters if provided
+        if optimizer_params:
+            self.balance_threshold = optimizer_params.get('BALANCE_THRESHOLD', 5.0)
+            self.max_passes = optimizer_params.get('MAX_PASSES', 10)
+            self.enable_cross_stat_balancing = optimizer_params.get('ENABLE_CROSS_STAT_BALANCING', True)
+            self.outfit_strategy = optimizer_params.get('OUTFIT_STRATEGY', 'deficit_first')
+            self.reference_baseline = optimizer_params.get('REFERENCE_BASELINE', 'auto')
+            
+            # Update room priorities from optimizer
+            if 'ROOM_PRIORITIES' in optimizer_params and optimizer_params['ROOM_PRIORITIES']:
+                custom_priorities = optimizer_params['ROOM_PRIORITIES']
+                for room_type, priority in custom_priorities.items():
+                    self.room_priorities[room_type] = priority
+                    if room_type in ['Power', 'Water', 'Food']:
+                        self.room_priorities[f"{room_type}2"] = priority
+        else:
+            self.balance_threshold = 5.0
+            self.max_passes = 10
+            self.enable_cross_stat_balancing = True
+            self.outfit_strategy = 'deficit_first'
+            self.reference_baseline = 'auto'
         
     def set_priorities(self, priorities_dict):
-        """
-        Set custom room priorities
-        priorities_dict: {'Medbay': 1, 'Power': 2, ...}
-        Lower number = higher priority
-        """
+
         self.room_priorities.update(priorities_dict)
         
     def get_priority(self, room_type):
@@ -206,7 +212,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
     
     # ===== INITIALIZE BALANCING CONFIG =====
     if balancing_config is None:
-        balancing_config = BalancingConfig()
+        balancing_config = BalancingConfig(optimizer_params)
     
     # ===== ADAPTIVE PARAMETERS =====
     if optimizer_params:
@@ -214,11 +220,11 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
         balancing_config.max_passes = optimizer_params.get('MAX_PASSES', 10)
         SWAP_AGGRESSIVENESS = optimizer_params.get('SWAP_AGGRESSIVENESS', 1.0)
         MIN_STAT_THRESHOLD = optimizer_params.get('MIN_STAT_THRESHOLD', 5)
-        OUTFIT_STRATEGY = optimizer_params.get('OUTFIT_STRATEGY', 'deficit_first')
     else:
         SWAP_AGGRESSIVENESS = 1.0
         MIN_STAT_THRESHOLD = 5
-        OUTFIT_STRATEGY = 'deficit_first'
+
+    OUTFIT_STRATEGY = balancing_config.outfit_strategy
 
     # --- Config / constants ----------------------------------------------------
     conn = sqlite3.connect("vault.db")
@@ -241,7 +247,8 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
         "Cafeteria": ("Food", "Agility"),
         "Hydroponic": ("Food2", "Agility"),
         "MedBay": ("Medbay", "Intelligence"),
-        "ScienceLab": ("Medbay", "Intelligence")
+        "ScienceLab": ("Medbay", "Intelligence"),
+        "NukaCola": ("NukaCola", ("Perception", "Agility"))  
     }
 
     ROOM_STAT_MAP = {
@@ -252,13 +259,14 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
         "Cafeteria": "Agility",
         "Hydroponic": "Agility",
         "MedBay": "Intelligence",
-        "ScienceLab": "Intelligence"
+        "ScienceLab": "Intelligence",
+        "NukaCola": ("Perception", "Agility")
     }
 
     ROOM_GROUPS = {
         "Power": ("Geothermal", "Energy2"),
-        "Water": ("WaterPlant", "Water2"),
-        "Food": ("Cafeteria", "Hydroponic"),
+        "Water": ("WaterPlant", "Water2", "NukaCola"),  
+        "Food": ("Cafeteria", "Hydroponic", "NukaCola"),  
         "Medbay": ("MedBay", "ScienceLab")
     }
 
@@ -269,7 +277,8 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
         "Power2": 1800,
         "Food2": 1200,
         "Water2": 1200,
-        "Medbay": 2400
+        "Medbay": 2400,
+        "NukaCola": 1200 
     }
 
     SIZE_MULTIPLIER = {"size3": 1, "size6": 2, "size9": 3}
@@ -278,15 +287,25 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
     # --- Storage ---------------------------------------------------------------
     initial_rooms = {}
     _room_counts = defaultdict(int)
+    Roomtables =  ["ConsumableRoom", "CraftingRoom", "Non_ProductionRoom", "ProductionRoom", "TrainingRoom" ]
 
-    # --- Load production rooms -------------------------------------------------
+    # --- Load ALL rooms for tracking (previous room assignments) ---------------
+    all_rooms = []
+    exclude = ["FakeWasteland","Elevator"]
+    for t in Roomtables:
+        cursor.execute(
+            f"SELECT dweller_id, RoomName, Row, Column, RoomLevel, MergeLevel FROM {t} WHERE RoomName NOT IN {tuple(exclude)}",
+        )
+        all_rooms.extend(cursor.fetchall())
+    
+    # --- Load ONLY production rooms for balancing ------------------------------
     cursor.execute(
         "SELECT dweller_id, RoomName, Row, Column, RoomLevel, MergeLevel FROM ProductionRoom",
     )
     production_rooms = cursor.fetchall()
 
     def _lvl_str(room_level: int) -> str:
-        return f"lvl{room_level if room_level in (1, 2) else 3}"
+        return f"lvl{room_level if room_level in (1, 2, 3) else None}"
 
     def _size_str(merge_level: int) -> str:
         if merge_level == 1:
@@ -295,21 +314,29 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
             return "size6"
         return "size9"
 
-    for dweller_ids, room_name, row, column, room_l, merge_l in production_rooms:
-        if room_name not in ROOM_STAT_MAP:
-            continue
+    # Build initial_rooms from ALL rooms (for tracking previous assignments)
+    for dweller_ids, room_name, row, column, room_l, merge_l in all_rooms:
+        if room_name in ROOM_STAT_MAP:
+            dwellers = [x.strip() for x in str(dweller_ids).split(",") if x.strip()]
 
-        dwellers = [x.strip() for x in str(dweller_ids).split(",") if x.strip()]
-
-        base_key = (room_name, _lvl_str(room_l), _size_str(merge_l))
-        _room_counts[base_key] += 1
-        room_number = str(_room_counts[base_key])
-        room_key = (base_key[0], base_key[1], base_key[2], room_number)
-        initial_rooms[room_key] = dwellers
-        print(room_name)
+            base_key = (room_name, _lvl_str(room_l), _size_str(merge_l))
+            _room_counts[base_key] += 1
+            room_number = str(_room_counts[base_key])
+            room_key = (base_key[0], base_key[1], base_key[2], room_number)
+            initial_rooms[room_key] = dwellers
+            
+        else:
+            dwellers = [x.strip() for x in str(dweller_ids).split(",") if x.strip()]
+            base_key = (room_name, _lvl_str(room_l), _size_str(merge_l))
+            _room_counts[base_key] += 1
+            room_number = str(_room_counts[base_key])
+            room_key = (base_key[0], base_key[1], base_key[2], room_number)
+            initial_rooms[room_key] = dwellers
     
+    print_section("INITIAL ROOMS AND ASSIGNED DWELLERS")
     for key, dwellers in initial_rooms.items():
-        print(f"Room: {key} -> Dwellers: {', '.join(dwellers)}")
+        
+        print(f" - {key} -> Dwellers: {', '.join(dwellers)}")
 
     # --- Parse vault_map.txt into room lists -----------------------------------
     geothermal = []
@@ -344,7 +371,9 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
                         lvl = 1
 
                     code = None
-                    if "Energy2" in room:
+                    if "NukaCola" in room:
+                        code = "NukaCola"
+                    elif "Energy2" in room:
                         code = "Energy2"
                     elif "Water2" in room:
                         code = "Water2"
@@ -376,7 +405,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
 
                     if code in ("Energy2", "Geothermal"):
                         geothermal.append(room_tuple)
-                    elif code in ("WaterPlant", "Water2"):
+                    elif code in ("WaterPlant", "Water2", "NukaCola"):
                         waterPlant.append(room_tuple)
                     elif code in ("Cafeteria", "Hydroponic"):
                         cafeteria.append(room_tuple)
@@ -476,15 +505,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
         
         dweller_stats[str(serialize_id)] = stat_map
         dweller_stats_initial[str(serialize_id)] = stat_map_initial
-
-    print(f"\nTotal Dwellers: {numDwellers}\n")
-    print("Dweller Stats (showing ALL stats):")
-    for dwid in list(Stats.keys())[:len(Stats)]:  
-        print(f"Dweller ID: {dwid}")
-        stats = dweller_stats[str(dwid)]
-        print(f"  S:{stats['Strength']} P:{stats['Perception']} E:{stats['Endurance']} "
-              f"C:{stats['Charisma']} I:{stats['Intelligence']} A:{stats['Agility']} L:{stats['Luck']}")
-    
+        
 
     vault_happiness = round(total_happiness / numDwellers) if numDwellers > 0 else 0
     print(f"\nVault Average Happiness: {vault_happiness}%\n")
@@ -767,6 +788,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
         code = room_key[0]
         size = room_key[2]
         room_type, stat = ROOM_CODE_MAP.get(code, (None, None))
+        # stat can be a string (single stat) or tuple (dual stats like NukaCola)
         return room_type, stat, size
 
     def calculate_modifier(merge_size, tier):
@@ -778,16 +800,23 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
         return value
 
     def get_room_production_time(room_key, dwellers, dweller_stats, happiness=1.0):
-        """
-        Calculate production time using corrected formula:
-        Pool / (total_stat * (1 + rounded(happiness)))
-        """
         room_type, stat, size = parse_room(room_key)
         if room_type is None or not dwellers:
             return None
 
         pool = BASE_POOL[room_type] * SIZE_MULTIPLIER[size]
-        total_stat = sum(dweller_stats.get(d, {}).get(stat, 0) for d in dwellers)
+        
+        # Handle dual-stat rooms (like NukaCola)
+        if isinstance(stat, tuple):
+            # For dual-stat rooms, use the average of both stats
+            stat1, stat2 = stat
+            total_stat = sum(
+                (dweller_stats.get(d, {}).get(stat1, 0) + dweller_stats.get(d, {}).get(stat2, 0)) / 2
+                for d in dwellers
+            )
+        else:
+            # Single-stat rooms
+            total_stat = sum(dweller_stats.get(d, {}).get(stat, 0) for d in dwellers)
 
         if total_stat == 0:
             return None
@@ -799,7 +828,6 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
         return round(production_time, 1)
 
     def recalc_mean_finder(stats_dict, sortList, happiness_value):
-        """Recalculate mean_finder with current sortedL assignments"""
         result = {}
         for room_key, dwellers in sortList.items():
             t = get_room_production_time(room_key, dwellers, stats_dict, happiness=happiness_value)
@@ -808,20 +836,21 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
         return result
 
     def calculate_overall_average(mean_map):
-        """Calculate overall average across all production rooms"""
         times = [t for r, t in mean_map.items() if r[0] not in TRAINING_ROOMS]
         return round(sum(times) / len(times), 2) if times else 0
 
     def group_means(mean_map):
         geo = [t for r, t in mean_map.items() if r[0] in ("Geothermal", "Energy2")]
-        wap = [t for r, t in mean_map.items() if r[0] in ("WaterPlant", "Water2")]
-        caf = [t for r, t in mean_map.items() if r[0] in ("Cafeteria", "Hydroponic")]
+        wap = [t for r, t in mean_map.items() if r[0] in ("WaterPlant", "Water2", "NukaCola")]
+        caf = [t for r, t in mean_map.items() if r[0] in ("Cafeteria", "Hydroponic", "NukaCola")]
         med = [t for r, t in mean_map.items() if r[0] in ("MedBay", "ScienceLab")]
+        nuka = [t for r, t in mean_map.items() if r[0] == "NukaCola"]
         return (
             (sum(geo) / len(geo)) if geo else None,
             (sum(wap) / len(wap)) if wap else None,
             (sum(caf) / len(caf)) if caf else None,
             (sum(med) / len(med)) if med else None,
+            (sum(nuka) / len(nuka)) if nuka else None,  # NukaCola separate average
         )
 
     # --- Calculate initial times (with existing outfits applied) ---------------
@@ -842,7 +871,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
     for room_key, t in before_balancing_times.items():
         print(f"{room_key} -> {t} seconds")
 
-    geo_mean, wap_mean, caf_mean, med_mean = group_means(before_balancing_times)
+    geo_mean, wap_mean, caf_mean, med_mean, nuka_mean = group_means(before_balancing_times)
 
     if geo_mean is not None:
         print(f"\nGeothermal Average Time: {round(geo_mean,1)} seconds")
@@ -852,6 +881,8 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
         print(f"Cafeteria Average Time: {round(caf_mean,1)} seconds")
     if med_mean is not None:
         print(f"Medbay Average Time: {round(med_mean,1)} seconds")
+    if nuka_mean is not None:
+        print(f"NukaCola Average Time: {round(nuka_mean,1)} seconds")
 
     initial_overall_avg = calculate_overall_average(initial_mean_finder)
     before_balance_overall_avg = calculate_overall_average(before_balancing_times)
@@ -862,7 +893,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
     print(f"Initial Average Time: {initial_overall_avg}s")
     print(f"Before Balancing Average Time: {before_balance_overall_avg}s")
 
-    # Determine which state to use as baseline for balancing
+
     working_stats = dweller_stats_initial.copy()
     outfit_owner_beforeswap = {}
     def get_outfit_bonus(dweller_id):
@@ -871,19 +902,36 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
             return outfit_mods[outfit_id]
         return None
 
-    if initial_overall_avg > 0 and initial_overall_avg < before_balance_overall_avg:
-        print(f"\n⚠️  Initial assignment ({initial_overall_avg}s) is BETTER than before balancing ({before_balance_overall_avg}s)")
+    # Check user's reference baseline preference
+    reference_baseline = balancing_config.reference_baseline
+    
+    if reference_baseline == 'before_balancing':
+        print(f"\nℹ️  Reference Baseline Setting: BEFORE BALANCING (user-forced)")
+        print(f"    Using BEFORE BALANCING state as baseline for balancing process")
+        outfit_owner_beforeswap = {d: get_outfit_bonus(d) for dwellers in sortedL.values() for d in dwellers}
+    elif reference_baseline == 'initial':
+        print(f"\nℹ️  Reference Baseline Setting: INITIAL STATE (user-forced)")
         print(f"    Using INITIAL state as baseline for balancing process")
         sortedL.clear()
         for room_key, dwellers in initial_rooms.items():
             sortedL[room_key] = dwellers.copy()
             outfit_owner_beforeswap.update({d: get_outfit_bonus(d) for d in dwellers})
-
         print(f"    ✓ Balancing will optimize from initial state")
     else:
-        print(f"\n✓ Before balancing ({before_balance_overall_avg}s) is better than or equal to initial ({initial_overall_avg}s)")
-        print(f"    Using BEFORE BALANCING state as baseline")
-        outfit_owner_beforeswap = {d: get_outfit_bonus(d) for dwellers in sortedL.values() for d in dwellers}
+        print(f"\nℹ️ AUTO")
+        if initial_overall_avg > 0 and initial_overall_avg < before_balance_overall_avg:
+            print(f"    ⚠️  Initial assignment ({initial_overall_avg}s) is BETTER than before balancing ({before_balance_overall_avg}s)")
+            print(f"    Using INITIAL state as baseline for balancing process")
+            sortedL.clear()
+            for room_key, dwellers in initial_rooms.items():
+                sortedL[room_key] = dwellers.copy()
+                outfit_owner_beforeswap.update({d: get_outfit_bonus(d) for d in dwellers})
+
+            print(f"    ✓ Balancing will optimize from initial state")
+        else:
+            print(f"    ✓ Before balancing ({before_balance_overall_avg}s) is better than or equal to initial ({initial_overall_avg}s)")
+            print(f"    Using BEFORE BALANCING state as baseline")
+            outfit_owner_beforeswap = {d: get_outfit_bonus(d) for dwellers in sortedL.values() for d in dwellers}
 
     # --- ENHANCED CROSS-STAT BALANCING WITH DETAILED LOGGING -------------------
     print_section("CROSS-STAT BALANCING WITH PRIORITY-BASED OPTIMIZATION")
@@ -894,6 +942,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
     print(f"  Balance Threshold: {balancing_config.balance_threshold}s")
     print(f"  Max Passes: {balancing_config.max_passes}")
     print(f"  Cross-Stat Balancing: {'Enabled' if balancing_config.enable_cross_stat_balancing else 'Disabled'}")
+    print(f"  Reference Baseline: {balancing_config.reference_baseline}")
     print(f"\nRoom Type Priorities (lower = higher priority):")
     for room_type in balancing_config.get_sorted_room_types():
         priority = balancing_config.get_priority(room_type)
@@ -904,7 +953,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
 
     for pass_num in range(1, balancing_config.max_passes + 1):
         mean_finder = recalc_mean_finder(working_stats, sortedL, happiness_decimal)
-        geo_mean, wap_mean, caf_mean, med_mean = group_means(mean_finder)
+        geo_mean, wap_mean, caf_mean, med_mean, nuka_mean = group_means(mean_finder)
         
         # Group means by room type
         group_targets = {
@@ -914,7 +963,8 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
             'Water2': wap_mean,
             'Food': caf_mean,
             'Food2': caf_mean,
-            'Medbay': med_mean
+            'Medbay': med_mean,
+            'NukaCola': nuka_mean  # NukaCola uses its own average
         }
 
         if not mean_finder:
@@ -940,7 +990,6 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
 
         swaps_this_pass = 0
         
-        # Get all production rooms sorted by priority
         all_production_rooms = [(r, mean_finder[r]) for r in mean_finder 
                                if r[0] not in TRAINING_ROOMS]
         
@@ -948,8 +997,6 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
 
 
         if balancing_config.enable_cross_stat_balancing:
-            # CROSS-STAT BALANCING
-            # Sort rooms by their deviation from target (worst first)
             room_deviations = []
             for room_key, prod_time in all_production_rooms:
                 rtype, stat, size = parse_room(room_key)
@@ -970,15 +1017,15 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
                     'stat': stat
                 })
             
-            # Sort by: 1) priority (high priority first), 2) deviation (worst first)
+
             room_deviations.sort(key=lambda x: (x['priority'], -abs(x['deviation'])))
             
 
 
 
-            # Try to improve each room, starting with highest priority
+
             for room_data in room_deviations:
-                if swaps_this_pass >= 20:  # Limit swaps per pass
+                if swaps_this_pass >= 20:  
                     break
                 
                 slow_room = room_data['room']
@@ -994,11 +1041,20 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
                 if not sortedL.get(slow_room):
                     continue
                 
-                worst_in_slow = min(sortedL[slow_room], 
-                                   key=lambda d: working_stats.get(d, {}).get(slow_stat, 0))
-                worst_stat_value = working_stats.get(worst_in_slow, {}).get(slow_stat, 0)
+                # Handle dual-stat rooms
+                if isinstance(slow_stat, tuple):
+                    # For dual-stat rooms, find dweller with worst average of both stats
+                    stat1, stat2 = slow_stat
+                    worst_in_slow = min(sortedL[slow_room], 
+                                       key=lambda d: (working_stats.get(d, {}).get(stat1, 0) + 
+                                                     working_stats.get(d, {}).get(stat2, 0)) / 2)
+                    worst_stat_value = (working_stats.get(worst_in_slow, {}).get(stat1, 0) + 
+                                       working_stats.get(worst_in_slow, {}).get(stat2, 0)) / 2
+                else:
+                    worst_in_slow = min(sortedL[slow_room], 
+                                       key=lambda d: working_stats.get(d, {}).get(slow_stat, 0))
+                    worst_stat_value = working_stats.get(worst_in_slow, {}).get(slow_stat, 0)
                 
-                # Look for swaps across ALL other rooms
                 best_swap = None
                 best_improvement = 0
                 
@@ -1013,19 +1069,27 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
                     for other_dweller in sortedL[other_room]:
                         other_dweller_stats = working_stats.get(other_dweller, {})
                         
-                        # Check if this swap would help
-                        other_in_slow_stat = other_dweller_stats.get(slow_stat, 0)
-                        worst_in_other_stat = working_stats.get(worst_in_slow, {}).get(other_stat, 0)
+                        # Calculate stat values for comparison (handle dual-stat rooms)
+                        if isinstance(slow_stat, tuple):
+                            stat1, stat2 = slow_stat
+                            other_in_slow_stat = (other_dweller_stats.get(stat1, 0) + 
+                                                 other_dweller_stats.get(stat2, 0)) / 2
+                        else:
+                            other_in_slow_stat = other_dweller_stats.get(slow_stat, 0)
                         
-                        # Skip if swap doesn't improve slow room
+                        if isinstance(other_stat, tuple):
+                            stat1, stat2 = other_stat
+                            worst_in_other_stat = (working_stats.get(worst_in_slow, {}).get(stat1, 0) + 
+                                                  working_stats.get(worst_in_slow, {}).get(stat2, 0)) / 2
+                        else:
+                            worst_in_other_stat = working_stats.get(worst_in_slow, {}).get(other_stat, 0)
+                        
                         if other_in_slow_stat <= worst_stat_value:
                             continue
                         
-                        # Simulate swap
-                        # Remove from current rooms
                         temp_slow = [d for d in sortedL[slow_room] if d != worst_in_slow]
                         temp_other = [d for d in sortedL[other_room] if d != other_dweller]
-                        # Add to new rooms
+
                         temp_slow.append(other_dweller)
                         temp_other.append(worst_in_slow)
                         
@@ -1161,7 +1225,7 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
     for room_key, t in after_balancing_times.items():
         print(f"{room_key} -> {t} seconds")
 
-    geo_mean, wap_mean, caf_mean, med_mean = group_means(after_balancing_times)
+    geo_mean, wap_mean, caf_mean, med_mean, nuka_mean = group_means(after_balancing_times)
 
     if geo_mean is not None:
         print(f"\nGeothermal Average Time: {round(geo_mean,1)} seconds")
@@ -1171,14 +1235,19 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
         print(f"Cafeteria Average Time: {round(caf_mean,1)} seconds")
     if med_mean is not None:
         print(f"Medbay Average Time: {round(med_mean,1)} seconds")
+    if nuka_mean is not None:
+        print(f"NukaCola Average Time: {round(nuka_mean,1)} seconds")
 
     # --- OUTFIT OPTIMIZATION (based on after-balancing placement) ---------------
     print("\n" + "="*60)
     print("OUTFIT OPTIMIZATION")
     print("="*60)
 
+    # Get outfit strategy from optimizer config
+    outfit_strategy = balancing_config.outfit_strategy if hasattr(balancing_config, 'outfit_strategy') else 'deficit_first'
+    print(f"Using strategy: {outfit_strategy}")
+
     # FIRST: Build complete map of who owned what outfit BEFORE any changes
-    # Map: outfit_id -> list of dweller_ids who had this outfit
     outfit_previous_owners_list = defaultdict(list)
     for dweller_id, outfit_id in existing_outfit_assignments.items():
         if outfit_id:
@@ -1190,10 +1259,19 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
         print(f"  {outfit_name}: {len(owners)} dweller(s)")
 
     # Start fresh for NEW outfit assignments
-    # Keep existing assignments that are still valid
     outfit_assignments = {}
     outfit_stat_map = {'Strength': 's', 'Perception': 'p', 'Agility': 'a', 'Intelligence': 'i',
                         'Endurance': 'e', 'Charisma': 'c', 'Luck': 'l'}
+
+    def get_dweller_gender(dweller_id):
+        """Return 'M', 'F', or '' for the given dweller ID."""
+        cursor.execute(
+            "SELECT Gender FROM dwellers WHERE dweller_id = ?", (dweller_id,)
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return ""
+        return (row[0] or "").strip()
 
     # Validate existing outfits against NEW placement
     print("\n" + "-"*60)
@@ -1201,32 +1279,82 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
     print("-"*60)
 
     outfits_to_relocate = []
-    
+
     for dweller_id, outfit_id in existing_outfit_assignments.items():
         dweller_room = None
         for room_key, dwellers in sortedL.items():
             if dweller_id in dwellers:
                 dweller_room = room_key
                 break
-        
+    
         if dweller_room and outfit_id in outfit_mods:
             room_type, stat, size = parse_room(dweller_room)
             outfit = outfit_mods[outfit_id]
             stat_key = outfit_stat_map.get(stat)
-            
+        
             if stat_key and outfit[stat_key] > 0:
-                # Keep this outfit - it's correctly placed
                 outfit_assignments[dweller_id] = outfit_id
                 print(f"✓ Dweller {dweller_id} in {room_type} room with {outfit['name']} (+{outfit[stat_key]} {stat})")
             else:
-                # Mark for relocation
                 print(f"⚠️  Dweller {dweller_id} in {room_type} room has MISPLACED {outfit['name']}")
                 outfits_to_relocate.append((dweller_id, outfit_id))
 
-    # Create stats WITH outfits for production time calculation
+    # Handle relocations FIRST, before applying outfit bonuses
+    if outfits_to_relocate:
+        print(f"\n⚠️  Found {len(outfits_to_relocate)} misplaced outfits - attempting to relocate...")
+
+        # REMOVE MISPLACED OUTFITS FROM outfit_assignments FIRST
+        for old_dweller_id, outfit_id in outfits_to_relocate:
+            if old_dweller_id in outfit_assignments:
+                del outfit_assignments[old_dweller_id]
+
+
+
+        for old_dweller_id, outfit_id in outfits_to_relocate:
+            outfit = outfit_mods[outfit_id]
+            stat_bonuses = [('Strength', outfit['s']), ('Perception', outfit['p']), 
+                          ('Agility', outfit['a']), ('Intelligence', outfit['i'])]
+            best_stat = max(stat_bonuses, key=lambda x: x[1])
+            best_stat_name, best_stat_value = best_stat
+    
+            if best_stat_value == 0:
+                continue
+    
+            found_new_home = False
+            for room_key, room_dwellers in sortedL.items():
+                room_type, stat, size = parse_room(room_key)
+                if room_key[0] in TRAINING_ROOMS:
+                    continue
+                if stat == best_stat_name:
+                    for potential_dweller in room_dwellers:
+                        if potential_dweller not in outfit_assignments and potential_dweller != old_dweller_id:
+                            # Gender compatibility check
+                            dweller_sex = get_dweller_gender(potential_dweller)
+                            if not outfit_manager.is_outfit_compatible(dweller_sex, outfit_id):
+                                continue
+                            outfit_assignments[potential_dweller] = outfit_id
+                            print(f"  ✓ Moved {outfit['name']} from Dweller {old_dweller_id} to Dweller {potential_dweller}")
+                            found_new_home = True
+                            break
+                if found_new_home:
+                    break
+            if not found_new_home:
+                print(f"  ⚠️  Could not relocate {outfit['name']} from Dweller {old_dweller_id}")
+ 
     dweller_stats_with_outfits = {k: v.copy() for k, v in working_stats.items()}
     
-    # Apply kept outfit bonuses
+    for dweller_id, outfit_id in existing_outfit_assignments.items():
+        if outfit_id in outfit_mods and dweller_id in dweller_stats_with_outfits:
+            outfit = outfit_mods[outfit_id]
+            dweller_stats_with_outfits[dweller_id]['Strength'] -= outfit['s']
+            dweller_stats_with_outfits[dweller_id]['Perception'] -= outfit['p']
+            dweller_stats_with_outfits[dweller_id]['Agility'] -= outfit['a']
+            dweller_stats_with_outfits[dweller_id]['Intelligence'] -= outfit['i']
+            dweller_stats_with_outfits[dweller_id]['Endurance'] -= outfit['e']
+            dweller_stats_with_outfits[dweller_id]['Charisma'] -= outfit['c']
+            dweller_stats_with_outfits[dweller_id]['Luck'] -= outfit['l']
+
+    # Apply ALL outfit bonuses from outfit_assignments (includes existing, relocated, and new)
     for dweller_id, outfit_id in outfit_assignments.items():
         if outfit_id in outfit_mods:
             outfit = outfit_mods[outfit_id]
@@ -1238,51 +1366,14 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
             dweller_stats_with_outfits[dweller_id]['Charisma'] += outfit['c']
             dweller_stats_with_outfits[dweller_id]['Luck'] += outfit['l']
 
-    # Handle relocations
-    if outfits_to_relocate:
-        print(f"\n⚠️  Found {len(outfits_to_relocate)} misplaced outfits - attempting to relocate...")
-
-        for old_dweller_id, outfit_id in outfits_to_relocate:
-            outfit = outfit_mods[outfit_id]
-            # Find outfit's best stat
-            stat_bonuses = [('Strength', outfit['s']), ('Perception', outfit['p']), 
-                          ('Agility', outfit['a']), ('Intelligence', outfit['i'])]
-            best_stat = max(stat_bonuses, key=lambda x: x[1])
-            best_stat_name, best_stat_value = best_stat
-        
-            if best_stat_value == 0:
-                continue
-        
-            found_new_home = False
-            for room_key, dwellers in sortedL.items():
-                room_type, stat, size = parse_room(room_key)
-                if room_key[0] in TRAINING_ROOMS:
-                    continue
-                if stat == best_stat_name:
-                    for potential_dweller in dwellers:
-                        if potential_dweller not in outfit_assignments and potential_dweller != old_dweller_id:
-                            outfit_assignments[potential_dweller] = outfit_id
-                            # Apply bonuses
-                            dweller_stats_with_outfits[potential_dweller]['Strength'] += outfit['s']
-                            dweller_stats_with_outfits[potential_dweller]['Perception'] += outfit['p']
-                            dweller_stats_with_outfits[potential_dweller]['Agility'] += outfit['a']
-                            dweller_stats_with_outfits[potential_dweller]['Intelligence'] += outfit['i']
-                            dweller_stats_with_outfits[potential_dweller]['Endurance'] += outfit['e']
-                            dweller_stats_with_outfits[potential_dweller]['Charisma'] += outfit['c']
-                            dweller_stats_with_outfits[potential_dweller]['Luck'] += outfit['l']
-                            print(f"  ✓ Moved {outfit['name']} from Dweller {old_dweller_id} to Dweller {potential_dweller}")
-                            found_new_home = True
-                            break
-                if found_new_home:
-                    break
 
     # Calculate room needs based on after-balancing placement
     room_needs = {}
     current_times = recalc_mean_finder(dweller_stats_with_outfits, sortedL, happiness_decimal)
-    
+
     # Recalculate group means
-    geo_mean_curr, wap_mean_curr, caf_mean_curr, med_mean_curr = group_means(current_times)
-    
+    geo_mean_curr, wap_mean_curr, caf_mean_curr, med_mean_curr, nuka_mean_curr = group_means(current_times)
+
     for room_key, prod_time in current_times.items():
         room_type, stat, size = parse_room(room_key)
         if room_type is None or room_key[0] in TRAINING_ROOMS:
@@ -1296,6 +1387,8 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
             target = caf_mean_curr
         elif room_type == "Medbay":
             target = med_mean_curr
+        elif room_type == "NukaCola":
+            target = nuka_mean_curr
         else:
             continue
 
@@ -1304,9 +1397,18 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
 
         pool = BASE_POOL[room_type] * SIZE_MULTIPLIER[size]
         dwellers = sortedL[room_key]
-        current_total = sum(dweller_stats_with_outfits.get(d, {}).get(stat, 0) for d in dwellers)
         
-        # Calculate ideal total needed to reach target time
+        # Handle dual-stat rooms for current_total calculation
+        if isinstance(stat, tuple):
+            stat1, stat2 = stat
+            current_total = sum(
+                (dweller_stats_with_outfits.get(d, {}).get(stat1, 0) + 
+                 dweller_stats_with_outfits.get(d, {}).get(stat2, 0)) / 2
+                for d in dwellers
+            )
+        else:
+            current_total = sum(dweller_stats_with_outfits.get(d, {}).get(stat, 0) for d in dwellers)
+    
         happiness = (happiness_decimal/100)
         ideal_total = pool / (target * (1 + happiness))
         stat_deficit = ideal_total - current_total
@@ -1317,17 +1419,9 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
             'current_time': prod_time,
             'target_time': target,
             'dwellers': dwellers,
-            'size': size
+            'size': size,
+            'room_type': room_type
         }
-
-    # Sort rooms by priority and deficit
-    def room_sort_key(item):
-        room_key, need_data = item
-        room_type, _, _ = parse_room(room_key)
-        priority = balancing_config.get_priority(room_type)
-        return (priority, -need_data['deficit'])
-    
-    sorted_rooms = sorted(room_needs.items(), key=room_sort_key)
 
     # Track outfit usage
     from collections import Counter
@@ -1337,6 +1431,8 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
 
     print(f"\nOutfits available for new assignments: {sum(outfit_inventory.values())}")
     print(f"Outfits already assigned: {len(outfit_assignments)}")
+
+
 
     def outfit_available(outfit_id):
         return outfit_used.get(outfit_id, 0) < outfit_inventory.get(outfit_id, 0)
@@ -1358,58 +1454,252 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
         return outfit['s'] + outfit['p'] + outfit['a'] + outfit['i'] + outfit['e'] + outfit['c'] + outfit['l']
 
     def get_outfit_efficiency(outfit_id, stat_name):
+        """Calculate how efficiently an outfit's total stats match the needed stat"""
         total = get_outfit_total_bonus(outfit_id)
         if total == 0:
             return 0
         relevant = get_outfit_bonus_for_stat(outfit_id, stat_name)
         return relevant / total
 
-    # PHASE 1: Priority-based deficit balancing
+    def get_room_value_score(room_key):
+        """Calculate room value based on level and size"""
+        level_scores = {'lvl3': 3, 'lvl2': 2, 'lvl1': 1}
+        size_scores = {'size9': 9, 'size6': 6, 'size3': 3}
+        level_score = level_scores.get(room_key[1], 1)
+        size_score = size_scores.get(room_key[2], 1)
+        return (level_score ** 2) * size_score
+
+    def get_room_priority(room_type):
+        """Get priority for room type (lower = higher priority)"""
+        return balancing_config.get_priority(room_type)
+
+    # ============================================================================
+    # STRATEGY FUNCTIONS
+    # ============================================================================
+
+    def sort_rooms_deficit_first(room_needs):
+        """deficit_first: Prioritize rooms needing most help"""
+        def sort_key(item):
+            room_key, need_data = item
+            room_type = need_data['room_type']
+            priority = get_room_priority(room_type)
+            deficit = need_data['deficit']
+            # Primary: room priority, Secondary: deficit amount
+            return (priority, -deficit)
+    
+        return sorted(room_needs.items(), key=sort_key)
+
+    def sort_rooms_big_rooms_first(room_needs):
+        """big_rooms_first: Prioritize high-level/merged rooms"""
+        def sort_key(item):
+            room_key, need_data = item
+            room_type = need_data['room_type']
+            priority = get_room_priority(room_type)
+            value_score = get_room_value_score(room_key)
+            # Primary: room priority, Secondary: room value (size * level)
+            return (priority, -value_score)
+    
+        return sorted(room_needs.items(), key=sort_key)
+
+    def sort_rooms_hybrid(room_needs):
+        """hybrid: Balance between deficit and room size"""
+        def sort_key(item):
+            room_key, need_data = item
+            room_type = need_data['room_type']
+            priority = get_room_priority(room_type)
+            deficit = need_data['deficit']
+            value_score = get_room_value_score(room_key)
+            # Normalize both scores and combine
+            deficit_normalized = deficit / 10  # Rough normalization
+            value_normalized = value_score / 27  # Max is 9*9=81, typical is ~27
+            hybrid_score = (deficit_normalized * 0.6) + (value_normalized * 0.4)
+            # Primary: room priority, Secondary: hybrid score
+            return (priority, -hybrid_score)
+    
+        return sorted(room_needs.items(), key=sort_key)
+
+    def sort_rooms_efficiency_first(room_needs):
+        """efficiency_first: Focus on maximizing outfit stat efficiency"""
+        def sort_key(item):
+            room_key, need_data = item
+            room_type = need_data['room_type']
+            priority = get_room_priority(room_type)
+            stat_needed = need_data['stat']
+        
+            # Calculate potential efficiency for this room
+            available_relevant_outfits = [
+                oid for oid in outfit_inventory
+                if oid in outfit_mods and 
+                get_outfit_bonus_for_stat(oid, stat_needed) > 0 and 
+                outfit_available(oid)
+            ]
+        
+            if available_relevant_outfits:
+                # Average efficiency of available outfits for this stat
+                avg_efficiency = sum(get_outfit_efficiency(oid, stat_needed) 
+                                   for oid in available_relevant_outfits) / len(available_relevant_outfits)
+            else:
+                avg_efficiency = 0
+        
+            # Primary: room priority, Secondary: outfit efficiency potential
+            return (priority, -avg_efficiency)
+    
+        return sorted(room_needs.items(), key=sort_key)
+
+    def select_best_outfit_for_strategy(available_outfits, stat_needed, strategy):
+        """Select the best outfit based on the current strategy"""
+        if not available_outfits:
+            return None
+    
+        if strategy == 'deficit_first':
+            # Maximize stat bonus (raw power)
+            return max(available_outfits, 
+                      key=lambda oid: get_outfit_bonus_for_stat(oid, stat_needed))
+    
+        elif strategy == 'big_rooms_first':
+            # Maximize stat bonus (same as deficit for outfit selection)
+            return max(available_outfits, 
+                      key=lambda oid: get_outfit_bonus_for_stat(oid, stat_needed))
+    
+        elif strategy == 'efficiency_first':
+            # Maximize efficiency (% of total stats that match needed stat)
+            return max(available_outfits, 
+                      key=lambda oid: (get_outfit_efficiency(oid, stat_needed), 
+                                      get_outfit_bonus_for_stat(oid, stat_needed)))
+    
+        elif strategy == 'hybrid':
+            # Balance between efficiency and raw power
+            def hybrid_score(oid):
+                efficiency = get_outfit_efficiency(oid, stat_needed)
+                bonus = get_outfit_bonus_for_stat(oid, stat_needed)
+                normalized_bonus = bonus / 7  # Max outfit bonus is typically ~7
+                return (efficiency * 0.5) + (normalized_bonus * 0.5)
+        
+            return max(available_outfits, key=hybrid_score)
+    
+        else:
+            # Default to deficit_first
+            return max(available_outfits, 
+                      key=lambda oid: get_outfit_bonus_for_stat(oid, stat_needed))
+
+
+
+    # ============================================================================
+    # APPLY SELECTED STRATEGY
+    # ============================================================================
+
+    """ 
+    FILTER OUT REDUNDANT ASSIGNMENTS - Some existing outfits may still be valid and efficient in new placement, so we keep them. 
+    This step just removes any that are now redundant (dweller already has the same outfit in the database) to free them up for reassignment if needed. 
+    """
     print("\n" + "-"*60)
-    print("OUTFIT ASSIGNMENT - PHASE 1: PRIORITY-BASED DEFICIT BALANCING")
+    print("FILTERING REDUNDANT OUTFIT ASSIGNMENTS")
     print("-"*60)
 
+    redundant_assignments = []
+    for dweller_id, outfit_id in list(outfit_assignments.items()):
+        # Check if this dweller already has this outfit in the database
+        if dweller_id in existing_outfit_assignments and existing_outfit_assignments[dweller_id] == outfit_id:
+            redundant_assignments.append((dweller_id, outfit_id))
+            
+    if redundant_assignments:
+        print(f"Found {len(redundant_assignments)} redundant assignments (dweller already wearing outfit):")
+        for dweller_id, outfit_id in redundant_assignments:
+            outfit_name = outfit_mods.get(outfit_id, {}).get('name', outfit_id)
+            print(f"  - Dweller {dweller_id} already has {outfit_name} - skipping")
+            del outfit_assignments[dweller_id]
+    else:
+        print("No redundant assignments found")
+
+
+    # Sort rooms based on strategy
+    if outfit_strategy == 'deficit_first':
+        sorted_rooms = sort_rooms_deficit_first(room_needs)
+        print("\n📊 Strategy: DEFICIT FIRST - Prioritizing rooms needing most help")
+    elif outfit_strategy == 'big_rooms_first':
+        sorted_rooms = sort_rooms_big_rooms_first(room_needs)
+        print("\n🏢 Strategy: BIG ROOMS FIRST - Prioritizing high-level/merged rooms")
+    elif outfit_strategy == 'hybrid':
+        sorted_rooms = sort_rooms_hybrid(room_needs)
+        print("\n⚖️  Strategy: HYBRID - Balancing deficit and room size")
+    elif outfit_strategy == 'efficiency_first':
+        sorted_rooms = sort_rooms_efficiency_first(room_needs)
+        print("\n⚡ Strategy: EFFICIENCY FIRST - Maximizing outfit stat efficiency")
+    else:
+        sorted_rooms = sort_rooms_deficit_first(room_needs)
+        print(f"\n⚠️  Unknown strategy '{outfit_strategy}', defaulting to DEFICIT FIRST")
+
+    # MAIN OUTFIT ASSIGNMENT LOOP
+    print("\n" + "-"*60)
+    print("OUTFIT ASSIGNMENT - STRATEGY-BASED OPTIMIZATION")
+    print("-"*60)
+
+    assignments_made = 0
+
     for room_key, need_data in sorted_rooms:
+        if not any_outfit_left():
+            print("\n⚠️  No more outfits available")
+            break
+    
         stat_needed = need_data['stat']
         deficit = need_data['deficit']
         dwellers = need_data['dwellers']
-        room_type, _, _ = parse_room(room_key)
-        priority = balancing_config.get_priority(room_type)
+        room_type = need_data['room_type']
+        priority = get_room_priority(room_type)
+        value_score = get_room_value_score(room_key)
 
-        if deficit <= 0:
-            print(f"\n{room_key} (Priority {priority}) is already balanced or overcapacity")
+        # Get unequipped dwellers in this room
+        unequipped_dwellers = [d for d in dwellers if d not in outfit_assignments]
+    
+        if not unequipped_dwellers:
             continue
 
-        print(f"\n{room_key} (Priority {priority}) needs +{round(deficit, 1)} {stat_needed}")
-
-        if not any_outfit_left():
-            print(f"  No outfits remaining")
-            continue
-
+        # Get available outfits for this stat
         relevant_outfits = [
             oid for oid in outfit_inventory
-            if oid in outfit_mods and get_outfit_bonus_for_stat(oid, stat_needed) > 0 and outfit_available(oid)
+            if oid in outfit_mods and 
+            get_outfit_bonus_for_stat(oid, stat_needed) > 0 and 
+            outfit_available(oid)
         ]
 
         if not relevant_outfits:
-            print(f"  No outfits available with {stat_needed} bonus")
             continue
 
-        best_outfits = sorted(
-            relevant_outfits,
-            key=lambda oid: (get_outfit_efficiency(oid, stat_needed), get_outfit_bonus_for_stat(oid, stat_needed)),
-            reverse=True
+        print(f"\n{room_key} (Priority {priority}, Value {value_score}, Deficit: {round(deficit, 1)} {stat_needed})")
+    
+        # Sort dwellers (lowest stat first = most benefit from outfit)
+        unequipped_dwellers.sort(
+            key=lambda d: dweller_stats_with_outfits.get(d, {}).get(stat_needed, 0)
         )
 
-        dwellers_sorted = sorted(dwellers, key=lambda d: dweller_stats_with_outfits.get(d, {}).get(stat_needed, 0))
-
-        for dweller_id in dwellers_sorted:
-            if not best_outfits:
+        # Assign outfits to dwellers in this room
+        for dweller_id in unequipped_dwellers:
+            if not relevant_outfits:
                 break
-            if dweller_id in outfit_assignments:
+
+            # Filter outfits by gender compatibility for this specific dweller
+            dweller_sex = get_dweller_gender(dweller_id)
+            gender_compatible_outfits = [
+                oid for oid in relevant_outfits
+                if outfit_manager.is_outfit_compatible(dweller_sex, oid)
+            ]
+
+            if not gender_compatible_outfits:
+                print(f"  ⚠️  No gender-compatible outfits available for Dweller {dweller_id} ({dweller_sex or 'unknown sex'})")
                 continue
 
-            outfit_id = best_outfits.pop(0)
+            # Select best outfit based on strategy
+            outfit_id = select_best_outfit_for_strategy(
+                gender_compatible_outfits,
+                stat_needed,
+                outfit_strategy
+            )
+        
+            if outfit_id is None:
+                break
+
+            # Remove from available pool
+            relevant_outfits.remove(outfit_id)
             outfit_used[outfit_id] += 1
             outfit_assignments[dweller_id] = outfit_id
             outfit = outfit_mods[outfit_id]
@@ -1425,78 +1715,29 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
 
             bonus = get_outfit_bonus_for_stat(outfit_id, stat_needed)
             efficiency = round(get_outfit_efficiency(outfit_id, stat_needed) * 100, 1)
-            print(f"  ✓ Assigned {outfit['name']} to Dweller {dweller_id} (+{bonus} {stat_needed}, {efficiency}% efficient)")
-
-            deficit -= bonus
-            if deficit <= 0:
-                print(f"  ✓ Room balanced!")
-                break
-
-    # PHASE 2: High-value rooms
-    if any_outfit_left():
-        print("\n" + "-"*60)
-        print("OUTFIT ASSIGNMENT - PHASE 2: HIGH-VALUE ROOMS")
-        print("-"*60)
+            total_bonus = get_outfit_total_bonus(outfit_id)
         
-        remaining_count = sum(outfit_inventory[oid] - outfit_used.get(oid, 0) for oid in outfit_inventory)
-        print(f"\n{remaining_count} outfits remaining")
+            print(f"  ✓ Assigned {outfit['name']} to Dweller {dweller_id}")
+            print(f"    +{bonus} {stat_needed} ({efficiency}% efficient, +{total_bonus} total stats)")
+        
+            assignments_made += 1
+            deficit -= bonus
 
-        production_rooms = [(room_key, need_data) for room_key, need_data in room_needs.items()]
-        level_scores = {'lvl3': 3, 'lvl2': 2, 'lvl1': 1}
-        size_scores = {'size9': 9, 'size6': 6, 'size3': 3}
-        production_rooms.sort(
-            key=lambda x: (level_scores.get(x[0][1], 1) ** 2) * size_scores.get(x[0][2], 1),
-            reverse=True
-        )
-
-        for room_key, need_data in production_rooms:
-            if not any_outfit_left():
+            # Strategy-specific stopping conditions
+            if outfit_strategy == 'deficit_first' and deficit <= 0:
+                print(f"  ✓ Room deficit eliminated!")
+                break
+            elif outfit_strategy == 'efficiency_first' and efficiency < 60:
+                print(f"  ⚠️  Efficiency threshold reached, moving to next room")
                 break
 
-            stat_needed = need_data['stat']
-            dwellers = need_data['dwellers']
-            unequipped_dwellers = [d for d in dwellers if d not in outfit_assignments]
-
-            if not unequipped_dwellers:
-                continue
-
-            print(f"\nAssigning to {room_key}:")
-
-            unequipped_dwellers.sort(key=lambda d: dweller_stats_with_outfits.get(d, {}).get(stat_needed, 0))
-
-            relevant_outfits = [
-                oid for oid in outfit_inventory
-                if oid in outfit_mods and get_outfit_bonus_for_stat(oid, stat_needed) > 0 and outfit_available(oid)
-            ]
-
-            if not relevant_outfits:
-                continue
-
-            relevant_outfits.sort(key=lambda oid: get_outfit_bonus_for_stat(oid, stat_needed), reverse=True)
-
-            for dweller_id in unequipped_dwellers:
-                if not relevant_outfits:
-                    break
-
-                outfit_id = relevant_outfits.pop(0)
-                outfit_used[outfit_id] += 1
-                outfit_assignments[dweller_id] = outfit_id
-                outfit = outfit_mods[outfit_id]
-
-                dweller_stats_with_outfits[dweller_id]['Strength'] += outfit['s']
-                dweller_stats_with_outfits[dweller_id]['Perception'] += outfit['p']
-                dweller_stats_with_outfits[dweller_id]['Agility'] += outfit['a']
-                dweller_stats_with_outfits[dweller_id]['Intelligence'] += outfit['i']
-                dweller_stats_with_outfits[dweller_id]['Endurance'] += outfit['e']
-                dweller_stats_with_outfits[dweller_id]['Charisma'] += outfit['c']
-                dweller_stats_with_outfits[dweller_id]['Luck'] += outfit['l']
-
-                bonus = get_outfit_bonus_for_stat(outfit_id, stat_needed)
-                print(f"  ✓ Assigned {outfit['name']} to Dweller {dweller_id} (+{bonus} {stat_needed})")
+    print(f"\n{'='*60}")
+    print(f"OUTFIT ASSIGNMENT COMPLETE - {assignments_made} new assignments")
+    print(f"{'='*60}")
 
     # Recalculate with outfits
     mean_finder_with_outfits = recalc_mean_finder(dweller_stats_with_outfits, sortedL, happiness_decimal)
-    
+
     print("\n" + "="*60)
     print("PRODUCTION TIMES WITH OUTFITS")
     print("="*60)
@@ -1506,22 +1747,30 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
             continue
         old_time = after_balancing_times.get(room_key, 0)
         improvement = old_time - t
-        print(f"{room_key} -> {t}s (was {old_time}s, improved by {round(improvement, 1)}s)")
+        improvement_pct = ((old_time - t) / old_time * 100) if old_time > 0 else 0
+        print(f"{room_key} -> {t:.1f}s (was {old_time:.1f}s, {improvement_pct:+.1f}%)")
 
-    geo_mean_new, wap_mean_new, caf_mean_new, med_mean_new = group_means(mean_finder_with_outfits)
+    geo_mean_new, wap_mean_new, caf_mean_new, med_mean_new, nuka_mean_new = group_means(mean_finder_with_outfits)
 
     print(f"\n{'='*60}")
     print("AVERAGE TIMES COMPARISON")
     print(f"{'='*60}")
 
     if geo_mean is not None and geo_mean_new is not None:
-        print(f"Power:  {round(geo_mean, 1)}s -> {round(geo_mean_new, 1)}s (Δ {round(geo_mean - geo_mean_new, 1)}s)")
+        improvement_pct = ((geo_mean - geo_mean_new) / geo_mean * 100)
+        print(f"Power:  {round(geo_mean, 1)}s -> {round(geo_mean_new, 1)}s (Δ {round(geo_mean - geo_mean_new, 1)}s, {improvement_pct:+.1f}%)")
     if wap_mean is not None and wap_mean_new is not None:
-        print(f"Water:  {round(wap_mean, 1)}s -> {round(wap_mean_new, 1)}s (Δ {round(wap_mean - wap_mean_new, 1)}s)")
+        improvement_pct = ((wap_mean - wap_mean_new) / wap_mean * 100)
+        print(f"Water:  {round(wap_mean, 1)}s -> {round(wap_mean_new, 1)}s (Δ {round(wap_mean - wap_mean_new, 1)}s, {improvement_pct:+.1f}%)")
     if caf_mean is not None and caf_mean_new is not None:
-        print(f"Food:   {round(caf_mean, 1)}s -> {round(caf_mean_new, 1)}s (Δ {round(caf_mean - caf_mean_new, 1)}s)")
+        improvement_pct = ((caf_mean - caf_mean_new) / caf_mean * 100)
+        print(f"Food:   {round(caf_mean, 1)}s -> {round(caf_mean_new, 1)}s (Δ {round(caf_mean - caf_mean_new, 1)}s, {improvement_pct:+.1f}%)")
     if med_mean is not None and med_mean_new is not None:
-        print(f"Medbay: {round(med_mean, 1)}s -> {round(med_mean_new, 1)}s (Δ {round(med_mean - med_mean_new, 1)}s)")
+        improvement_pct = ((med_mean - med_mean_new) / med_mean * 100)
+        print(f"Medbay: {round(med_mean, 1)}s -> {round(med_mean_new, 1)}s (Δ {round(med_mean - med_mean_new, 1)}s, {improvement_pct:+.1f}%)")
+    if nuka_mean is not None and nuka_mean_new is not None:
+        improvement_pct = ((nuka_mean - nuka_mean_new) / nuka_mean * 100)
+        print(f"NukaCola: {round(nuka_mean, 1)}s -> {round(nuka_mean_new, 1)}s (Δ {round(nuka_mean - nuka_mean_new, 1)}s, {improvement_pct:+.1f}%)")
 
     # Outfit assignment summary
     print(f"\n{'='*60}")
@@ -1530,7 +1779,8 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
 
     new_assignments = {k: v for k, v in outfit_assignments.items() if k not in existing_outfit_assignments}
     kept_existing = {k: v for k, v in outfit_assignments.items() if k in existing_outfit_assignments}
-    
+
+    print(f"Strategy Used: {outfit_strategy}")
     print(f"Total outfits assigned: {len(outfit_assignments)}")
     print(f"  - Pre-existing (kept): {len(kept_existing)}")
     print(f"  - Newly assigned: {len(new_assignments)}")
@@ -1538,6 +1788,26 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
 
     remaining = sum(outfit_inventory[oid] - outfit_used.get(oid, 0) for oid in outfit_inventory)
     print(f"Remaining unassigned outfits: {remaining}")
+
+    # Strategy-specific metrics
+    if outfit_strategy == 'efficiency_first':
+        total_efficiency = 0
+        count = 0
+        for dweller_id, outfit_id in new_assignments.items():
+            dweller_room = None
+            for room_key, dwellers in sortedL.items():
+                if dweller_id in dwellers:
+                    dweller_room = room_key
+                    break
+            if dweller_room:
+                _, stat, _ = parse_room(dweller_room)
+                eff = get_outfit_efficiency(outfit_id, stat)
+                total_efficiency += eff
+                count += 1
+    
+        if count > 0:
+            avg_efficiency = (total_efficiency / count) * 100
+            print(f"Average outfit efficiency: {avg_efficiency:.1f}%")
 
     # Plotting
     exclude = {"Gym", "Armory", "Dojo", "Classroom"}
@@ -1634,7 +1904,6 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
                         'to': f"{assigned_room_tuple[0]}_{assigned_room_tuple[1]}_{assigned_room_tuple[2]}_{assigned_room_tuple[3]}",
                     }
 
-            # Get all stats for this dweller
             dweller_all_stats = working_stats.get(dweller_id, {})
             
             dweller_entry = {
@@ -1648,20 +1917,18 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
             }
 
          
-            # Add outfit info if assigned
             if dweller_id in outfit_assignments:
                 outfit_id = outfit_assignments[dweller_id]
                 outfit = outfit_mods[outfit_id]
                 
-                # Check if this outfit had previous owner(s)
                 previous_owner_info = None
                 if outfit_id in outfit_previous_owners_list:
-                    # Get list of previous owners for this outfit type
+
                     previous_owners = outfit_previous_owners_list[outfit_id]
                     
                     # Find if any previous owner is different from current dweller and hasn't been reassigned
                     for prev_owner_id in previous_owners:
-                        # Skip if this dweller already had this outfit
+
                         if prev_owner_id == dweller_id:
                             continue
                         
@@ -1698,7 +1965,6 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
 
             optimization_results['dweller_assignments'].append(dweller_entry)
 
-    # Save room assignments
     for room_key, dwellers_in_room in sortedL.items():
         room_id = f"{room_key[0]}_{room_key[1]}_{room_key[2]}_{room_key[3]}"
         dweller_list = []
@@ -1729,7 +1995,8 @@ def run(json_path, outfitlist, vault_name, optimizer_params=None, balancing_conf
         'power_avg': round(geo_mean_new, 2) if geo_mean_new else None,
         'water_avg': round(wap_mean_new, 2) if wap_mean_new else None,
         'food_avg': round(caf_mean_new, 2) if caf_mean_new else None,
-        'medbay_avg': round(med_mean_new, 2) if med_mean_new else None
+        'medbay_avg': round(med_mean_new, 2) if med_mean_new else None,
+        'nukacola_avg': round(nuka_mean_new, 2) if nuka_mean_new else None
     }
     
     results_file = f"{vault_name}_optimization_results.json"

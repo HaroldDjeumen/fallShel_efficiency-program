@@ -5,7 +5,8 @@ from datetime import datetime
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QPushButton, QLabel, QTextEdit, 
                                QLineEdit, QGroupBox, QListWidget, QTabWidget,
-                               QProgressBar, QScrollArea, QFrame, QSplitter, QMessageBox)
+                               QProgressBar, QScrollArea, QFrame, QSplitter, QMessageBox,
+                               QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QFormLayout, QRadioButton, QFileDialog)
 from PySide6.QtCore import QThread, Signal, Qt, QTimer
 from PySide6.QtGui import QFont, QPalette, QColor, QPixmap
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -13,9 +14,17 @@ from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 
 from placementCalc import NULL
+from placementCalc import BalancingConfig
 from outfit_manager import OutfitDatabaseManager
+from AdaptiveVaultOptimizer import AdaptiveVaultOptimizer
 from version import __version__ as APP_VERSION
 import updater
+from vault_map_tab import VaultMapTab
+from vault_map_tab import RoomCell
+
+
+
+vault_design = []
 
 # Thread for running optimization cycles
 class OptimizationThread(QThread):
@@ -24,11 +33,13 @@ class OptimizationThread(QThread):
     # accept any Python object (str path, dict, or list) from the worker
     dweller_suggestions = Signal(dict)
     missing_outfits_found = Signal(list)  # Signal for missing outfits
+    vault_design_ready = Signal(list)     # <-- new signal to send vault design to GUI
     
-    def __init__(self, vault_name, outfit_list):
+    def __init__(self, vault_name, outfit_list, optimizer_params=None):
         super().__init__()
         self.vault_name = vault_name
         self.outfit_list = outfit_list
+        self.optimizer_params = optimizer_params
         self.running = True
         self.cycle_count = 0
         
@@ -48,18 +59,21 @@ class OptimizationThread(QThread):
             try:
                 self.cycle_count += 1
                 
-                # Get optimizer params
-                optimizer_params = optimizer.get_optimization_params()
+                # Use manual params if provided, otherwise get from optimizer
+                if self.optimizer_params:
+                    optimizer_params = self.optimizer_params
+                else:
+                    optimizer_params = optimizer.get_optimization_params()
                 
                 # Run cycle
                 json_path = sav_fetcher.run(self.vault_name)
                 outfitlist = TableSorter.run(json_path)
-                
-                # Check for missing outfits
+               
+
                 outfit_manager = OutfitDatabaseManager()
                 missing = outfit_manager.check_missing_outfits(outfitlist)
                 
-                if missing and self.cycle_count == 1:  # Only check on first cycle
+                if missing and self.cycle_count in range(1, 100):  # Only check on first cycle
                     self.missing_outfits_found.emit(missing)
                     # Pause thread until user handles missing outfits
                     while missing:
@@ -70,6 +84,21 @@ class OptimizationThread(QThread):
                             return
                 
                 virtualvaultmap.run(json_path)
+                self.vault_design = virtualvaultmap.run(json_path)
+                # Emit the design so the main thread can update the VaultMapTab
+                self.vault_design_ready.emit(self.vault_design)
+
+                # Update vault map widget if provided (schedule on main thread)
+                if getattr(self, "vault_widget", None) is not None:
+                    try:
+                        from PySide6.QtCore import QTimer
+                        QTimer.singleShot(0, lambda d=self.vault_design: self.vault_widget.set_vault_design(d))
+                    except Exception:
+                        # Fallback: try direct call (not recommended but safe as last resort)
+                        try:
+                            self.vault_widget.set_vault_design(self.vault_design)
+                        except Exception:
+                            pass
                 
                 # Capture suggestions or results file from placementCalc
                 suggestions = None
@@ -99,8 +128,8 @@ class OptimizationThread(QThread):
                 
                 self.cycle_complete.emit(self.cycle_count, stats)
                 
-                # Every 5 cycles, run adaptive analysis
-                if self.cycle_count % 2 == 0 and self.cycle_count >= 2:
+                # Every 5 cycles, run adaptive analysis (only if not using manual params)
+                if not self.optimizer_params and self.cycle_count % 2 == 0 and self.cycle_count >= 2:
                     optimizer.apply_adjustments(auto_apply=True)
                 
                 # Wait 60 seconds
@@ -115,6 +144,9 @@ class OptimizationThread(QThread):
     
     def stop(self):
         self.running = False
+
+
+
 
 
 class ProductionBarChart(FigureCanvas):
@@ -255,7 +287,7 @@ class PerformanceChart(FigureCanvas):
         
         if not history['timestamps']:
             return
-            
+                        
         # Convert timestamps to datetime objects
         dates = [datetime.fromisoformat(ts) for ts in history['timestamps']]
         
@@ -316,6 +348,7 @@ class FalloutShelterGUI(QMainWindow):
         self.vault_name = None
         self.is_running = False
         self.outfit_manager = OutfitDatabaseManager()
+        self.manual_mode = False  
         
         # Setup UI
         self.setup_ui()
@@ -381,13 +414,23 @@ class FalloutShelterGUI(QMainWindow):
                 border-color: #555555;
                 color: #555555;
             }
-            QLineEdit {
+            QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
                 background-color: #2a2a2a;
                 border: 2px solid #00ff00;
                 border-radius: 3px;
                 padding: 5px;
                 color: #00ff00;
                 font-size: 11px;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid #00ff00;
+                margin-right: 5px;
             }
             QTextEdit, QListWidget {
                 background-color: #2a2a2a;
@@ -400,6 +443,21 @@ class FalloutShelterGUI(QMainWindow):
             QLabel {
                 color: #00ff00;
                 font-size: 11px;
+            }
+            QCheckBox {
+                color: #00ff00;
+                font-size: 11px;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+                border: 2px solid #00ff00;
+                border-radius: 3px;
+                background-color: #2a2a2a;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #00ff00;
+                image: none;
             }
             QProgressBar {
                 border: 2px solid #00ff00;
@@ -556,6 +614,709 @@ class FalloutShelterGUI(QMainWindow):
         layout.addStretch()
         return panel
     
+    def create_settings_tab(self):
+        """Create comprehensive settings tab with all configurable parameters"""
+        settings_widget = QWidget()
+        main_layout = QVBoxLayout(settings_widget)
+        
+        # Scroll area for settings
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+        
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        
+        # Header
+        header = QLabel("⚙️ OPTIMIZATION SETTINGS")
+        header.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffcc00; padding: 10px;")
+        header.setAlignment(Qt.AlignCenter)
+        scroll_layout.addWidget(header)
+        
+        # Mode selection
+        mode_group = QGroupBox("Optimization Mode")
+        mode_layout = QVBoxLayout()
+        
+        self.auto_mode_radio = QRadioButton("Adaptive Mode (AI adjusts settings automatically)")
+        self.auto_mode_radio.setChecked(True)
+        self.auto_mode_radio.toggled.connect(self.on_mode_changed)
+        mode_layout.addWidget(self.auto_mode_radio)
+        
+        self.manual_mode_radio = QRadioButton("Manual Mode (Use settings below)")
+        self.manual_mode_radio.toggled.connect(self.on_mode_changed)
+        mode_layout.addWidget(self.manual_mode_radio)
+        
+        mode_info = QLabel("In Adaptive Mode, the optimizer will automatically adjust settings based on performance.")
+        mode_info.setStyleSheet("color: #888888; font-size: 12px; font-style: italic;")
+        mode_info.setWordWrap(True)
+        mode_layout.addWidget(mode_info)
+        
+        mode_group.setLayout(mode_layout)
+        scroll_layout.addWidget(mode_group)
+        
+        # Balancing Parameters
+        balance_group = QGroupBox("Balancing Parameters")
+        balance_layout = QFormLayout()
+        
+        # Balance threshold
+        self.balance_threshold_spin = QDoubleSpinBox()
+        self.balance_threshold_spin.setRange(1.0, 20.0)
+        self.balance_threshold_spin.setValue(5.0)
+        self.balance_threshold_spin.setSingleStep(0.5)
+        self.balance_threshold_spin.setSuffix(" seconds")
+        balance_layout.addRow("Balance Threshold:", self.balance_threshold_spin)
+        
+        threshold_info = QLabel("How close room times need to be to target (lower = more aggressive balancing)")
+        threshold_info.setStyleSheet("color: #888888; font-size: 12px; font-style: italic;")
+        threshold_info.setWordWrap(True)
+        balance_layout.addRow("", threshold_info)
+        
+        # Max balance passes
+        self.max_passes_spin = QSpinBox()
+        self.max_passes_spin.setRange(1, 25)
+        self.max_passes_spin.setValue(10)
+        balance_layout.addRow("Max Balance Passes:", self.max_passes_spin)
+        
+        passes_info = QLabel("Maximum number of balancing iterations (more passes = more thorough)")
+        passes_info.setStyleSheet("color: #888888; font-size: 12px; font-style: italic;")
+        passes_info.setWordWrap(True)
+        balance_layout.addRow("", passes_info)
+        
+        # Cross-stat balancing
+        self.cross_stat_check = QRadioButton("Enable Cross-Stat Balancing")
+        self.cross_stat_check.setChecked(True)
+        balance_layout.addRow("", self.cross_stat_check)
+        
+        cross_stat_info = QLabel("Allow dweller swaps between different room types (e.g., Power ↔ Water)")
+        cross_stat_info.setStyleSheet("color: #888888; font-size: 12px; font-style: italic;")
+        cross_stat_info.setWordWrap(True)
+        balance_layout.addRow("", cross_stat_info)
+        
+        # Reference Baseline Selection
+        ref_label = QLabel("Reference Baseline:")
+        ref_label.setStyleSheet("color: #ffcc00; font-weight: bold;")
+        
+        self.ref_baseline_combo = QComboBox()
+        self.ref_baseline_combo.addItems(["Auto (Best Performance)", "Initial State", "Before Balancing"])
+        self.ref_baseline_combo.setCurrentText("Auto (Best Performance)")
+        balance_layout.addRow(ref_label, self.ref_baseline_combo)
+        
+        ref_info = QLabel("Choose which state to use as reference for balancing optimization")
+        ref_info.setStyleSheet("color: #888888; font-size: 12px; font-style: italic;")
+        ref_info.setWordWrap(True)
+        balance_layout.addRow("", ref_info)
+        
+        balance_group.setLayout(balance_layout)
+        scroll_layout.addWidget(balance_group)
+        
+        # Dweller Assignment Parameters
+        dweller_group = QGroupBox("Dweller Assignment")
+        dweller_layout = QFormLayout()
+        
+        # Swap aggressiveness
+        self.swap_aggression_spin = QDoubleSpinBox()
+        self.swap_aggression_spin.setRange(0.5, 5.0)
+        self.swap_aggression_spin.setValue(1.0)
+        self.swap_aggression_spin.setSingleStep(0.1)
+        dweller_layout.addRow("Swap Aggressiveness:", self.swap_aggression_spin)
+        
+        aggression_info = QLabel("How willing to move dwellers (0.5=conservative, 5.0=very aggressive)")
+        aggression_info.setStyleSheet("color: #888888; font-size: 12px; font-style: italic;")
+        aggression_info.setWordWrap(True)
+        dweller_layout.addRow("", aggression_info)
+        
+        # Min stat threshold
+        self.min_stat_spin = QSpinBox()
+        self.min_stat_spin.setRange(0, 10)
+        self.min_stat_spin.setValue(5)
+        dweller_layout.addRow("Min Stat Threshold:", self.min_stat_spin)
+        
+        min_stat_info = QLabel("Minimum stat value for dweller assignment (0=allow all, 10=only best)")
+        min_stat_info.setStyleSheet("color: #888888; font-size: 12px; font-style: italic;")
+        min_stat_info.setWordWrap(True)
+        dweller_layout.addRow("", min_stat_info)
+        
+        dweller_group.setLayout(dweller_layout)
+        scroll_layout.addWidget(dweller_group)
+        
+        # Outfit Strategy
+        outfit_group = QGroupBox("Outfit Assignment Strategy")
+        outfit_layout = QFormLayout()
+        
+        self.outfit_strategy_combo = QComboBox()
+        self.outfit_strategy_combo.addItems([
+            "deficit_first", 
+            "big_rooms_first", 
+            "hybrid",
+            "efficiency_first"
+        ])
+        outfit_layout.addRow("Strategy:", self.outfit_strategy_combo)
+        
+        strategy_info = QLabel(
+            "deficit_first: Prioritize rooms needing most help\n"
+            "big_rooms_first: Prioritize high-level/merged rooms\n"
+            "hybrid: Balance between deficit and room size\n"
+            "efficiency_first: Maximize outfit stat efficiency"
+        )
+        strategy_info.setStyleSheet("color: #888888; font-size: 12px; font-style: italic;")
+        strategy_info.setWordWrap(True)
+        outfit_layout.addRow("", strategy_info)
+        
+        outfit_group.setLayout(outfit_layout)
+        scroll_layout.addWidget(outfit_group)
+        
+        # Room Priorities
+        priority_group = QGroupBox("Room Type Priorities")
+        priority_layout = QFormLayout()
+        
+        priority_info = QLabel("Lower number = higher priority (1=highest, 10=lowest)")
+        priority_info.setStyleSheet("color: #ffcc00; font-size: 12px; font-weight: bold;")
+        priority_info.setWordWrap(True)
+        priority_layout.addRow("", priority_info)
+        
+        self.priority_spins = {}
+        room_types = ['Medbay', 'Power', 'Water', 'Food']
+        default_priorities = {'Medbay': 1, 'Power': 2, 'Water': 3, 'Food': 4}
+        
+        for room_type in room_types:
+            spin = QSpinBox()
+            spin.setRange(1, 10)
+            spin.setValue(default_priorities.get(room_type, 5))
+            self.priority_spins[room_type] = spin
+            priority_layout.addRow(f"{room_type}:", spin)
+        
+        priority_group.setLayout(priority_layout)
+        scroll_layout.addWidget(priority_group)
+        
+        # Action buttons
+        button_layout = QHBoxLayout()
+        
+        self.save_settings_btn = QPushButton("💾 SAVE SETTINGS")
+        self.save_settings_btn.clicked.connect(self.save_settings)
+        button_layout.addWidget(self.save_settings_btn)
+        
+        self.load_settings_btn = QPushButton("📂 LOAD SETTINGS")
+        self.load_settings_btn.clicked.connect(self.load_settings)
+        button_layout.addWidget(self.load_settings_btn)
+        
+        self.reset_settings_btn = QPushButton("🔄 RESET TO DEFAULTS")
+        self.reset_settings_btn.clicked.connect(self.reset_settings)
+        button_layout.addWidget(self.reset_settings_btn)
+        
+        scroll_layout.addLayout(button_layout)
+        
+        # Status message
+        self.settings_status = QLabel("")
+        self.settings_status.setStyleSheet("color: #1dd1a1; font-size: 11px; font-weight: bold;")
+        self.settings_status.setAlignment(Qt.AlignCenter)
+        scroll_layout.addWidget(self.settings_status)
+        
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        main_layout.addWidget(scroll)       # <-- ensure the scroll area is added to the tab
+        self.disable_settings_controls()
+        return settings_widget
+    
+    def on_mode_changed(self):
+        """Handle mode toggle between adaptive and manual"""
+        if self.auto_mode_radio.isChecked():
+            self.manual_mode = False
+            self.manual_mode_radio.setChecked(False)
+            self.disable_settings_controls()
+            self.log("Switched to Adaptive Mode - AI will adjust settings", "#48dbfb")
+            if hasattr(self, 'optimizer') and self.optimizer:
+                self.optimizer.set_manual_mode(False)
+        elif self.manual_mode_radio.isChecked():
+            self.manual_mode = True
+            self.auto_mode_radio.setChecked(False)
+            self.enable_settings_controls()
+            self.log("Switched to Manual Mode - Using custom settings", "#ffcc00")
+            if hasattr(self, 'optimizer') and self.optimizer:
+                self.optimizer.set_manual_mode(True)
+                current_settings = self.get_current_settings()
+                self.optimizer.update_from_manual_settings(current_settings)
+
+    def disable_settings_controls(self):
+        """Disable all settings controls (used in Adaptive Mode)"""
+        disabled_tooltip = "Switch to Manual Mode to edit this setting"
+        
+        self.balance_threshold_spin.setEnabled(False)
+        self.balance_threshold_spin.setToolTip(disabled_tooltip)
+        
+        self.max_passes_spin.setEnabled(False)
+        self.max_passes_spin.setToolTip(disabled_tooltip)
+        
+        self.cross_stat_check.setEnabled(False)
+        self.cross_stat_check.setToolTip(disabled_tooltip)
+        
+        self.swap_aggression_spin.setEnabled(False)
+        self.swap_aggression_spin.setToolTip(disabled_tooltip)
+        
+        self.min_stat_spin.setEnabled(False)
+        self.min_stat_spin.setToolTip(disabled_tooltip)
+        
+        self.outfit_strategy_combo.setEnabled(False)
+        self.outfit_strategy_combo.setToolTip(disabled_tooltip)
+        
+        for spin in self.priority_spins.values():
+            spin.setEnabled(False)
+            spin.setToolTip(disabled_tooltip)
+        
+        self.save_settings_btn.setEnabled(False)
+        self.save_settings_btn.setToolTip(disabled_tooltip)
+        
+        self.reset_settings_btn.setEnabled(False)
+        self.reset_settings_btn.setToolTip(disabled_tooltip)
+    
+    def enable_settings_controls(self):
+        """Enable all settings controls (used in Manual Mode)"""
+        self.balance_threshold_spin.setEnabled(True)
+        self.balance_threshold_spin.setToolTip("")
+        
+        self.max_passes_spin.setEnabled(True)
+        self.max_passes_spin.setToolTip("")
+        
+        self.cross_stat_check.setEnabled(True)
+        self.cross_stat_check.setToolTip("")
+        
+        self.swap_aggression_spin.setEnabled(True)
+        self.swap_aggression_spin.setToolTip("")
+        
+        self.min_stat_spin.setEnabled(True)
+        self.min_stat_spin.setToolTip("")
+        
+        self.outfit_strategy_combo.setEnabled(True)
+        self.outfit_strategy_combo.setToolTip("")
+        
+        for spin in self.priority_spins.values():
+            spin.setEnabled(True)
+            spin.setToolTip("")
+        
+        self.save_settings_btn.setEnabled(True)
+        self.save_settings_btn.setToolTip("")
+        
+        self.reset_settings_btn.setEnabled(True)
+        self.reset_settings_btn.setToolTip("")
+    
+    def get_current_settings(self):
+        """Get current settings from UI controls"""
+        # Map display text to internal value
+        ref_baseline_map = {
+            "Auto (Best Performance)": "auto",
+            "Initial State": "initial",
+            "Before Balancing": "before_balancing"
+        }
+        
+        settings = {
+            'BALANCE_THRESHOLD': self.balance_threshold_spin.value(),
+            'MAX_PASSES': self.max_passes_spin.value(),
+            'SWAP_AGGRESSIVENESS': self.swap_aggression_spin.value(),
+            'MIN_STAT_THRESHOLD': self.min_stat_spin.value(),
+            'OUTFIT_STRATEGY': self.outfit_strategy_combo.currentText(),
+            'ENABLE_CROSS_STAT_BALANCING': self.cross_stat_check.isChecked(),
+            'REFERENCE_BASELINE': ref_baseline_map.get(self.ref_baseline_combo.currentText(), 'auto'),
+            'ROOM_PRIORITIES': {
+                room_type: spin.value() 
+                for room_type, spin in self.priority_spins.items()
+            }
+        }
+        return settings
+    
+    def start_optimization(self):
+        """Start the optimization process with adaptive or manual settings"""
+    
+        # Get vault selection
+        vault_file, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Vault Save File",
+            "",
+            "JSON Files (*.json);;All Files (*)"
+        )
+    
+        if not vault_file:
+            self.log("No vault file selected", "#ee5a6f")
+            return
+    
+        # Extract vault name from file path
+        self.vault_name = os.path.splitext(os.path.basename(vault_file))[0]
+        self.log(f"Selected vault: {self.vault_name}", "#1dd1a1")
+    
+        # Initialize optimizer with manual mode status
+        self.optimizer = AdaptiveVaultOptimizer(self.vault_name, manual_mode=self.manual_mode)
+        self.log(f"Initialized optimizer in {'Manual' if self.manual_mode else 'Adaptive'} mode", "#48dbfb")
+    
+        # If in manual mode, update optimizer with current settings
+        if self.manual_mode:
+            current_settings = self.get_current_settings()
+            self.optimizer.update_from_manual_settings(current_settings)
+            self.log("Applied manual settings to optimizer", "#ffcc00")
+    
+        # Get optimization parameters for placementCalc
+        optimizer_params = self.optimizer.get_optimization_params()
+    
+        # Create balancing config with optimizer parameters
+        self.balancing_config = BalancingConfig(optimizer_params)
+    
+        # Log current optimization parameters
+        self.log("\n--- Optimization Parameters ---", "#48dbfb")
+        self.log(f"Balance Threshold: {optimizer_params['BALANCE_THRESHOLD']}", "#ffffff")
+        self.log(f"Max Passes: {optimizer_params['MAX_PASSES']}", "#ffffff")
+        self.log(f"Swap Aggressiveness: {optimizer_params['SWAP_AGGRESSIVENESS']}", "#ffffff")
+        self.log(f"Min Stat Threshold: {optimizer_params['MIN_STAT_THRESHOLD']}", "#ffffff")
+        self.log(f"Outfit Strategy: {optimizer_params['OUTFIT_STRATEGY']}", "#ffffff")
+        self.log(f"Cross-Stat Balancing: {optimizer_params['ENABLE_CROSS_STAT_BALANCING']}", "#ffffff")
+        self.log(f"Reference Baseline: {optimizer_params['REFERENCE_BASELINE']}", "#ffffff")
+    
+        if optimizer_params.get('ROOM_PRIORITIES'):
+            self.log("Room Priorities:", "#ffffff")
+            for room_type, priority in optimizer_params['ROOM_PRIORITIES'].items():
+                self.log(f"  {room_type}: {priority}", "#ffffff")
+    
+        self.log("--- Starting Optimization ---\n", "#48dbfb")
+    
+        try:
+            # Disable start button during optimization
+            self.start_btn.setEnabled(False)
+            self.start_btn.setText("⏳ OPTIMIZING...")
+        
+            # Run the actual optimization (call your placementCalc script)
+            self.run_placement_calc(vault_file, optimizer_params)
+        
+            # After optimization completes
+            self.log("\n✓ Optimization complete!", "#1dd1a1")
+        
+            # If in adaptive mode, analyze performance and suggest adjustments
+            if not self.manual_mode:
+                self.log("\n--- Adaptive Analysis ---", "#48dbfb")
+                suggestions = self.optimizer.suggest_adjustments()
+            
+                if suggestions and suggestions.get('adjustments'):
+                    self.log("⚠️ Performance issues detected - adjustments suggested", "#ffcc00")
+                
+                    # Ask user if they want to apply adjustments
+                    reply = QMessageBox.question(
+                        self,
+                        "Adaptive Adjustments Available",
+                        "The adaptive optimizer has suggested parameter adjustments.\n\n"
+                        "Would you like to apply these adjustments for the next optimization cycle?",
+                        QMessageBox.Yes | QMessageBox.No
+                    )
+                
+                    if reply == QMessageBox.Yes:
+                        self.optimizer.apply_adjustments(auto_apply=True)
+                        self.log("✓ Adaptive adjustments applied", "#1dd1a1")
+                    else:
+                        self.log("Adaptive adjustments declined", "#888888")
+                else:
+                    self.log("✓ Performance on track - no adjustments needed", "#1dd1a1")
+        
+        except Exception as e:
+            self.log(f"\n✗ Optimization failed: {str(e)}", "#ee5a6f")
+            QMessageBox.critical(self, "Optimization Error", f"An error occurred:\n\n{str(e)}")
+    
+        finally:
+            # Re-enable start button
+            self.start_btn.setEnabled(True)
+            self.start_btn.setText("▶️ START OPTIMIZATION")
+
+    def run_placement_calc(self, vault_file, optimizer_params):
+        """
+        Execute the placementCalc optimization with given parameters
+        """
+        self.log("Loading vault data...", "#48dbfb")
+    
+        try:
+            # Load vault data to extract outfit list
+            import json
+        
+            self.log(f"Reading vault file: {vault_file}", "#888888")
+        
+            with open(vault_file, 'r') as f:
+                vault_data = json.load(f)
+        
+            # Extract outfit list from dwellers
+            outfitlist = []
+            dwellers = vault_data.get('dwellers', {}).get('dwellers', [])
+        
+            self.log(f"Found {len(dwellers)} dwellers in vault", "#888888")
+        
+            for dweller in dwellers:
+                outfit = dweller.get('equipedOutfit', {}).get('id')
+                if outfit:
+                    outfitlist.append(outfit)
+        
+            self.log(f"Found {len(outfitlist)} outfits to optimize", "#1dd1a1")
+        
+            # Import placementCalc
+            from placementCalc import run
+        
+            # Get just the filename (placementCalc expects it in Downloads folder)
+            json_filename = os.path.basename(vault_file)
+        
+            self.log(f"Starting optimization with strategy: {optimizer_params.get('OUTFIT_STRATEGY')}", "#48dbfb")
+        
+            # Run optimization
+            results_file = run(
+                json_path=json_filename,
+                outfitlist=outfitlist,
+                vault_name=self.vault_name,
+                optimizer_params=optimizer_params,
+                balancing_config=None
+            )
+        
+            # Load results if file was created
+            if results_file and os.path.exists(results_file):
+                self.log(f"Loading results from {results_file}", "#888888")
+                with open(results_file, 'r') as f:
+                    results = json.load(f)
+            
+                # Display results
+                self.display_optimization_results(results)
+            
+                # Save performance history for adaptive learning
+                self.save_performance_history(results)
+            else:
+                self.log("⚠️ No results file generated", "#ffcc00")
+    
+        except FileNotFoundError as e:
+            self.log(f"✗ File not found: {str(e)}", "#ee5a6f")
+            self.log("Make sure the vault file is in the Downloads folder", "#ffcc00")
+    
+        except ImportError as e:
+            self.log(f"⚠️ placementCalc module not found: {str(e)}", "#ffcc00")
+            self.log("Make sure placementCalc.py is in the same directory", "#ffcc00")
+    
+        except Exception as e:
+            self.log(f"✗ Optimization error: {str(e)}", "#ee5a6f")
+            import traceback
+            error_details = traceback.format_exc()
+            self.log(error_details, "#888888")
+            QMessageBox.critical(
+                self, 
+                "Optimization Error", 
+                f"An error occurred during optimization:\n\n{str(e)}\n\nCheck the log for details."
+            )
+
+    def display_optimization_results(self, results):
+        """Display the optimization results in the GUI"""
+    
+        self.log("\n" + "="*60, "#ffffff")
+        self.log("OPTIMIZATION RESULTS", "#1dd1a1")
+        self.log("="*60, "#ffffff")
+    
+        if 'initial_time' in results:
+            self.log(f"Initial State: {results['initial_time']:.1f}s", "#ffffff")
+    
+        if 'before_balance_time' in results:
+            self.log(f"Before Balancing: {results['before_balance_time']:.1f}s", "#ffffff")
+    
+        if 'after_balance_time' in results:
+            self.log(f"After Balancing: {results['after_balance_time']:.1f}s", "#ffffff")
+    
+        if 'with_outfits_time' in results:
+            self.log(f"With Outfits: {results['with_outfits_time']:.1f}s", "#1dd1a1")
+    
+        # Calculate improvements
+        if 'initial_time' in results and 'with_outfits_time' in results:
+            improvement = results['initial_time'] - results['with_outfits_time']
+            improvement_pct = (improvement / results['initial_time']) * 100
+            self.log(f"\nTotal Improvement: {improvement:.1f}s ({improvement_pct:.1f}%)", "#1dd1a1")
+    
+        # Room-by-room breakdown
+        if 'room_times' in results:
+            self.log("\n--- Room Production Times ---", "#48dbfb")
+            for room_key, time_data in results['room_times'].items():
+                self.log(f"{room_key}: {time_data['final']:.1f}s (was {time_data['initial']:.1f}s)", "#ffffff")
+    
+        # Outfit assignments
+        if 'outfit_assignments' in results:
+            self.log(f"\nOutfits Assigned: {len(results['outfit_assignments'])}", "#ffcc00")
+
+    def save_performance_history(self, results):
+        """Save performance metrics for adaptive learning"""
+    
+        history_file = f"{self.vault_name}_performance_history.json"
+    
+        # Load existing history
+        if os.path.exists(history_file):
+            with open(history_file, 'r') as f:
+                history = json.load(f)
+        else:
+            history = {
+                'timestamps': [],
+                'initial': [],
+                'before_balance': [],
+                'after_balance': [],
+                'with_outfits': []
+            }
+    
+        # Append new data
+        from datetime import datetime
+        history['timestamps'].append(datetime.now().isoformat())
+        history['initial'].append(results.get('initial_time', 0))
+        history['before_balance'].append(results.get('before_balance_time', 0))
+        history['after_balance'].append(results.get('after_balance_time', 0))
+        history['with_outfits'].append(results.get('with_outfits_time', 0))
+    
+        # Save updated history
+        with open(history_file, 'w') as f:
+            json.dump(history, f, indent=2)
+    
+        self.log(f"\n✓ Performance data saved to {history_file}", "#888888")
+
+
+    def on_mode_changed(self):
+        """Handle mode toggle between adaptive and manual"""
+        if self.auto_mode_radio.isChecked():
+            self.manual_mode = False
+            self.manual_mode_radio.setChecked(False)
+            self.disable_settings_controls()
+            self.log("Switched to Adaptive Mode - AI will adjust settings", "#48dbfb")
+        
+            # Update optimizer if it exists
+            if hasattr(self, 'optimizer') and self.optimizer:
+                self.optimizer.set_manual_mode(False)
+            
+        elif self.manual_mode_radio.isChecked():
+            self.manual_mode = True
+            self.auto_mode_radio.setChecked(False)
+            self.enable_settings_controls()
+            self.log("Switched to Manual Mode - Using custom settings", "#ffcc00")
+        
+            # Update optimizer if it exists
+            if hasattr(self, 'optimizer') and self.optimizer:
+                self.optimizer.set_manual_mode(True)
+                current_settings = self.get_current_settings()
+                self.optimizer.update_from_manual_settings(current_settings)
+
+    def save_settings(self):
+        """Save current settings to file and update optimizer"""
+        if not self.vault_name:
+            QMessageBox.warning(self, "No Vault", "Please start optimization first to select a vault.")
+            return
+    
+        settings = self.get_current_settings()
+        settings_file = f"{self.vault_name}_manual_settings.json"
+    
+        with open(settings_file, 'w') as f:
+            json.dump(settings, f, indent=2)
+    
+        # Update optimizer with new settings
+        if hasattr(self, 'optimizer') and self.optimizer and self.manual_mode:
+            self.optimizer.update_from_manual_settings(settings)
+            # Recreate balancing config with new parameters
+            optimizer_params = self.optimizer.get_optimization_params()
+            self.balancing_config = BalancingConfig(optimizer_params)
+    
+        self.settings_status.setText(f"✓ Settings saved and applied to {settings_file}")
+        self.log(f"Settings saved and applied to optimizer", "#1dd1a1")
+    
+        QTimer.singleShot(3000, lambda: self.settings_status.setText(""))
+
+    def apply_settings_to_optimizer(self):
+        """Apply current UI settings to the optimizer (called during optimization runs)"""
+        if self.manual_mode and hasattr(self, 'optimizer') and self.optimizer:
+            current_settings = self.get_current_settings()
+            self.optimizer.update_from_manual_settings(current_settings)
+            optimizer_params = self.optimizer.get_optimization_params()
+            self.balancing_config = BalancingConfig(optimizer_params)
+            return optimizer_params
+        elif hasattr(self, 'optimizer') and self.optimizer:
+            return self.optimizer.get_optimization_params()
+        return None
+    
+    def load_settings(self):
+        """Load settings from file"""
+        if not self.vault_name:
+            QMessageBox.warning(self, "No Vault", "Please start optimization first to select a vault.")
+            return
+        
+        settings_file = f"{self.vault_name}_manual_settings.json"
+        
+        if not os.path.exists(settings_file):
+            QMessageBox.information(self, "No Saved Settings", f"No saved settings found for {self.vault_name}")
+            return
+        
+        try:
+            with open(settings_file, 'r') as f:
+                settings = json.load(f)
+            
+            # Apply settings to UI
+            self.balance_threshold_spin.setValue(settings.get('BALANCE_THRESHOLD', 5.0))
+            self.max_passes_spin.setValue(settings.get('MAX_PASSES', 10))
+            self.swap_aggression_spin.setValue(settings.get('SWAP_AGGRESSIVENESS', 1.0))
+            self.min_stat_spin.setValue(settings.get('MIN_STAT_THRESHOLD', 5))
+            
+            strategy = settings.get('OUTFIT_STRATEGY', 'deficit_first')
+            index = self.outfit_strategy_combo.findText(strategy)
+            if index >= 0:
+                self.outfit_strategy_combo.setCurrentIndex(index)
+            
+            self.cross_stat_check.setChecked(settings.get('ENABLE_CROSS_STAT_BALANCING', True))
+            
+            # Load reference baseline
+            ref_baseline_reverse_map = {
+                "auto": "Auto (Best Performance)",
+                "initial": "Initial State",
+                "before_balancing": "Before Balancing"
+            }
+            ref_baseline_text = ref_baseline_reverse_map.get(
+                settings.get('REFERENCE_BASELINE', 'auto'), 
+                'Auto (Best Performance)'
+            )
+            ref_index = self.ref_baseline_combo.findText(ref_baseline_text)
+            if ref_index >= 0:
+                self.ref_baseline_combo.setCurrentIndex(ref_index)
+            
+            # Load priorities
+            priorities = settings.get('ROOM_PRIORITIES', {})
+            for room_type, value in priorities.items():
+                if room_type in self.priority_spins:
+                    self.priority_spins[room_type].setValue(value)
+            
+            # Enable manual mode when loading settings
+            self.manual_mode_radio.setChecked(True)
+            self.manual_mode = True
+            self.enable_settings_controls()
+            
+            self.settings_status.setText(f"✓ Settings loaded from {settings_file}")
+            self.log(f"Settings loaded from {settings_file} - Switched to Manual Mode", "#1dd1a1")
+            
+            QTimer.singleShot(3000, lambda: self.settings_status.setText(""))
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load settings: {str(e)}")
+    
+    def reset_settings(self):
+        """Reset all settings to defaults"""
+        reply = QMessageBox.question(
+            self, 
+            "Reset Settings", 
+            "Are you sure you want to reset all settings to defaults?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            self.balance_threshold_spin.setValue(5.0)
+            self.max_passes_spin.setValue(10)
+            self.swap_aggression_spin.setValue(1.0)
+            self.min_stat_spin.setValue(5)
+            self.outfit_strategy_combo.setCurrentIndex(0)
+            self.cross_stat_check.setChecked(True)
+            self.ref_baseline_combo.setCurrentIndex(0)  # Reset to "Initial State"
+            
+            default_priorities = {'Medbay': 1, 'Power': 2, 'Water': 3, 'Food': 4}
+            for room_type, spin in self.priority_spins.items():
+                spin.setValue(default_priorities.get(room_type, 5))
+            
+            self.auto_mode_radio.setChecked(True)
+            self.manual_mode = False
+            
+            self.settings_status.setText("✓ Settings reset to defaults")
+            self.log("Settings reset to defaults", "#1dd1a1")
+            
+            QTimer.singleShot(3000, lambda: self.settings_status.setText(""))
+    
     def create_right_panel(self):
         """Create right panel with tabs"""
         panel = QWidget()
@@ -608,6 +1369,14 @@ class FalloutShelterGUI(QMainWindow):
         stats_layout.addWidget(self.stats_display)
         
         tabs.addTab(stats_tab, "📈 Statistics")
+        
+        # ── Vault Map tab (NEW) ──────────────────────────────────────────────
+        self.vault_map_tab = VaultMapTab()
+        tabs.addTab(self.vault_map_tab, "🗺️ Vault Map")
+        
+        # Settings tab
+        settings_tab = self.create_settings_tab()
+        tabs.addTab(settings_tab, "⚙️ Settings")
         
         layout.addWidget(tabs)
         return panel
@@ -673,7 +1442,17 @@ class FalloutShelterGUI(QMainWindow):
         self.vault_name = f"vault{vault_num}"
         self.is_running = True
         
-        self.log(f"✓ Starting optimization for {self.vault_name}", "#ffcc00")
+        # Inform vault map tab of the selected vault
+        self.vault_map_tab.set_vault_name(self.vault_name)
+        
+        # Get optimizer params based on mode
+        optimizer_params = None
+        if self.manual_mode:
+            optimizer_params = self.get_current_settings()
+            self.log(f"✓ Starting optimization for {self.vault_name} (Manual Mode)", "#ffcc00")
+        else:
+            self.log(f"✓ Starting optimization for {self.vault_name} (Adaptive Mode)", "#ffcc00")
+        
         self.status_label.setText("Status: RUNNING")
         self.status_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #00ff00;")
         
@@ -682,11 +1461,16 @@ class FalloutShelterGUI(QMainWindow):
         self.vault_input.setEnabled(False)
         
         # Start optimization thread
-        self.optimization_thread = OptimizationThread(self.vault_name, [])
+        self.optimization_thread = OptimizationThread(self.vault_name, [], optimizer_params)
+        # Connect signals BEFORE starting the thread
         self.optimization_thread.cycle_complete.connect(self.on_cycle_complete)
         self.optimization_thread.error_occurred.connect(self.on_error)
         self.optimization_thread.dweller_suggestions.connect(self.update_suggestions)
         self.optimization_thread.missing_outfits_found.connect(self.handle_missing_outfits)
+        # Connect new vault design signal to VaultMapTab (runs on main thread)
+        self.optimization_thread.vault_design_ready.connect(self.vault_map_tab.set_vault_design)
+        # Also inform the tab which vault is selected (optional, for manual reload)
+        self.vault_map_tab.set_vault_name(self.vault_name)
         self.optimization_thread.start()
         
         # Start chart updates
@@ -953,15 +1737,10 @@ class FalloutShelterGUI(QMainWindow):
                     stats.append(f'<span style="color: #1dd1a1;">A+{agility_bonus}</span>')
                 stats_text = ' | '.join(stats) if stats else 'No bonuses'
 
-                # Create card with colored border - FIXED VERSION
                 html += f'<hr style="border: none; height: 3px; background-color:{border_color}; margin: 5px 0;">'
-        
-                # Dweller name and ID
                 html += f'<div style="font-size: 24px; color: #ffcc00; font-weight: bold; margin-bottom: 5px; margin-top: 20px;">{name}</div>'
                 html += f'<div style="font-size: 14px; color: #888888; margin-bottom: 5px;">ID: {id}</div>'
-        
-                # Stat bonus
-                html += f'<div style="font-size: 18px; color: {border_color}; font-weight: bold; margin-bottom: 5px;">{stats_text}</div>'
+                html += f'<div style="font-size: 18px; color: {border_color}; font-weight: bold, margin-bottom: 5px;">{stats_text}</div>'
         
                 # Outfit name
                 html += f'<div style="font-size: 18px; color: #ffffff; margin-bottom: 15px;"><strong>Outfit name:</strong> {outfit.get("outfit_name", "Unknown")}</div>'
@@ -1129,7 +1908,7 @@ class FalloutShelterGUI(QMainWindow):
         self.log(f"📊 Final report generated with {stats['total_cycles']} cycle graphs")
 
     def check_updates_action(self):
-        repo = "HaroldDjeumen/fallShel_efficiency-program"  # change if repo differs
+        repo = "HaroldDjeumen/fallShel_efficiency-program"  
         self.log("Checking for updates...", "#48dbfb")
         self.update_thread = UpdateCheckThread(APP_VERSION, repo, asset_match="win")
         self.update_thread.finished_signal.connect(self.on_update_check_finished)
@@ -1161,7 +1940,6 @@ class FalloutShelterGUI(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     
-    # Set application font
     font = QFont("Consolas", 10)
     app.setFont(font)
     

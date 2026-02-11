@@ -223,3 +223,16 @@ def run(json_path):
 
 
     draw_vault(vault)
+
+    room_objects = []
+    for room in rooms:
+        room_objects.append({
+            "type": room.get("type"),
+            "row": room.get("row"),
+            "col": room.get("col"),
+            "mergeLevel": room.get("mergeLevel"),
+            "level": room.get("level"),
+            "width": get_room_width(room.get("type"), room.get("mergeLevel"))
+        })
+
+    return room_objects

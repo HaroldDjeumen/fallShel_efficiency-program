@@ -16,7 +16,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.spec.AlgorithmParameterSpec;
 import java.security.spec.InvalidKeySpecException;
 
-import org.apache.commons.codec.binary.Base64;
+import java.util.Base64;
 
 public class Main {
 
@@ -28,7 +28,7 @@ public class Main {
             File file ;
             FileWriter fooWriter;
             String text = readFile(args[0], Charset.defaultCharset());
-            if (Base64.isArrayByteBase64(text.getBytes())){
+            if (isBase64(text)){
                 file = new File(args[0]);
                 fooWriter = new FileWriter(file, false);
                 fooWriter.write(decrypt(text, 0));
@@ -71,7 +71,7 @@ public class Main {
                     cipher.init(Cipher.DECRYPT_MODE, secret, ivSpec);
                     byte[] decodedValue = new byte[0];
                     try {
-                        decodedValue = Base64.decodeBase64(text.getBytes("UTF-8"));
+                        decodedValue = Base64.getDecoder().decode(text.getBytes("UTF-8"));
                     } catch (UnsupportedEncodingException e) {
                         e.printStackTrace();
                     }
@@ -86,7 +86,7 @@ public class Main {
                     } catch (UnsupportedEncodingException e) {
                         e.printStackTrace();
                     }
-                    data = Base64.encodeBase64String(result);
+                    data = Base64.getEncoder().encodeToString(result);
                     return data;
             }
 
@@ -113,5 +113,14 @@ public class Main {
     {
         byte[] encoded = Files.readAllBytes(Paths.get(path));
         return new String(encoded, encoding);
+    }
+
+    static boolean isBase64(String str) {
+        try {
+            Base64.getDecoder().decode(str);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 }

@@ -8,25 +8,79 @@ class AdaptiveVaultOptimizer:
     """
     Analyzes performance history and adjusts optimization parameters
     to ensure "with outfits" always beats the initial state
+    Supports both adaptive (AI-driven) and manual (user-defined) modes
     """
     
-    def __init__(self, vault_name):
+    def __init__(self, vault_name, manual_mode=False):
         self.vault_name = vault_name
         self.config_file = f"{vault_name}_optimizer_config.json"
+        self.manual_settings_file = f"{vault_name}_manual_settings.json"
+        self.manual_mode = manual_mode
         self.config = self._load_config()
         self.history_file = f"{vault_name}_performance_history.json"
+    
+    def set_manual_mode(self, enabled):
+        """Switch between manual and adaptive modes"""
+        self.manual_mode = enabled
+        if enabled:
+            # Load manual settings if they exist
+            self._load_manual_settings()
+        else:
+            # Reload adaptive config
+            self.config = self._load_config()
+    
+    def _load_manual_settings(self):
+        """Load user-defined manual settings"""
+        if os.path.exists(self.manual_settings_file):
+            try:
+                with open(self.manual_settings_file, 'r') as f:
+                    manual_settings = json.load(f)
+                    # Update config with manual settings
+                    self.config.update({
+                        'balance_threshold': manual_settings.get('BALANCE_THRESHOLD', 5.0),
+                        'max_balance_passes': manual_settings.get('MAX_PASSES', 10),
+                        'outfit_strategy': manual_settings.get('OUTFIT_STRATEGY', 'deficit_first'),
+                        'swap_aggressiveness': manual_settings.get('SWAP_AGGRESSIVENESS', 1.0),
+                        'min_stat_threshold': manual_settings.get('MIN_STAT_THRESHOLD', 5),
+                        'enable_cross_stat_balancing': manual_settings.get('ENABLE_CROSS_STAT_BALANCING', True),
+                        'room_priorities': manual_settings.get('ROOM_PRIORITIES', {}),
+                        'reference_baseline': manual_settings.get('REFERENCE_BASELINE', 'auto')
+                    })
+                    print(f"✓ Loaded manual settings from {self.manual_settings_file}")
+            except Exception as e:
+                print(f"⚠ Failed to load manual settings: {e}")
+    
+    def update_from_manual_settings(self, settings_dict):
+        """Update configuration from GUI manual settings"""
+        self.config.update({
+            'balance_threshold': settings_dict.get('BALANCE_THRESHOLD', 5.0),
+            'max_balance_passes': settings_dict.get('MAX_PASSES', 10),
+            'outfit_strategy': settings_dict.get('OUTFIT_STRATEGY', 'deficit_first'),
+            'swap_aggressiveness': settings_dict.get('SWAP_AGGRESSIVENESS', 1.0),
+            'min_stat_threshold': settings_dict.get('MIN_STAT_THRESHOLD', 5),
+            'enable_cross_stat_balancing': settings_dict.get('ENABLE_CROSS_STAT_BALANCING', True),
+            'room_priorities': settings_dict.get('ROOM_PRIORITIES', {}),
+            'reference_baseline': settings_dict.get('REFERENCE_BASELINE', 'auto')
+        })
+        # Save manual settings
+        with open(self.manual_settings_file, 'w') as f:
+            json.dump(settings_dict, f, indent=2)
+        print(f"✓ Manual settings updated and saved")
     
     def _load_config(self):
         """Load optimizer configuration with adaptive parameters"""
         default_config = {
-            'balance_threshold': 5.0,  # How close rooms need to be to target
-            'max_balance_passes': 10, # Goes up to 25
-            'outfit_strategy': 'deficit_first',  # or 'big_rooms_first'
-            'swap_aggressiveness': 1.0,  # How willing to swap dwellers (0.5-5.0)
-            'min_stat_threshold': 5,  # Min stat value to consider dweller for room
-            'learning_rate': 0.1,  # How fast to adjust parameters
-            'performance_window': 10,  # Number of cycles to analyze
-            'target_improvement': 0.05,  # 5% improvement target
+            'balance_threshold': 5.0,
+            'max_balance_passes': 10,
+            'outfit_strategy': 'deficit_first',
+            'swap_aggressiveness': 1.0,
+            'min_stat_threshold': 5,
+            'enable_cross_stat_balancing': True,
+            'room_priorities': {},
+            'reference_baseline': 'auto',  # 'auto', 'initial' or 'before_balancing'
+            'learning_rate': 0.1,
+            'performance_window': 10,
+            'target_improvement': 0.05,
         }
         
         if os.path.exists(self.config_file):
@@ -40,151 +94,17 @@ class AdaptiveVaultOptimizer:
         return default_config
     
     def _save_config(self):
-        """Save updated configuration"""
-        with open(self.config_file, 'w') as f:
-            json.dump(self.config, f, indent=2)
-    
-    def analyze_performance(self):
-        """Analyze recent performance and identify issues"""
-        if not os.path.exists(self.history_file):
-            return None
-        
-        with open(self.history_file, 'r') as f:
-            history = json.load(f)
-        
-        if len(history['timestamps']) < 2:
-            return None
-        
-        # Get recent window
-        window = self.config['performance_window']
-        initial = history['initial'][-window:]
-        before_balance = history['before_balance'][-window:]
-        after_balance = history['after_balance'][-window:]
-        with_outfits = history['with_outfits'][-window:]
-        
-        analysis = {
-            'initial_avg': np.mean(initial),
-            'before_balance_avg': np.mean(before_balance),
-            'after_balance_avg': np.mean(after_balance),
-            'with_outfits_avg': np.mean(with_outfits),
-            'initial_trend': self._calculate_trend(initial),
-            'with_outfits_trend': self._calculate_trend(with_outfits),
-        }
-        
-        # Check if goals are met
-        analysis['outfit_beats_initial'] = analysis['with_outfits_avg'] < analysis['initial_avg']
-        analysis['outfit_beats_before'] = analysis['with_outfits_avg'] < analysis['before_balance_avg']
-        analysis['outfit_beats_after'] = analysis['with_outfits_avg'] < analysis['after_balance_avg']
-        
-        # Calculate gaps
-        analysis['gap_to_initial'] = analysis['with_outfits_avg'] - analysis['initial_avg']
-        analysis['gap_to_before'] = analysis['with_outfits_avg'] - analysis['before_balance_avg']
-        analysis['gap_to_after'] = analysis['with_outfits_avg'] - analysis['after_balance_avg']
-        
-        return analysis
-    
-    def _calculate_trend(self, values):
-        """Calculate trend direction (positive = getting worse)"""
-        if len(values) < 2:
-            return 0
-        x = np.arange(len(values))
-        slope = np.polyfit(x, values, 1)[0]
-        return slope
-    
-    def suggest_adjustments(self):
-        """Analyze performance and suggest parameter adjustments"""
-        analysis = self.analyze_performance()
-        
-        if analysis is None:
-            print("Not enough data to analyze yet")
-            return None
-        
-        suggestions = {
-            'issues': [],
-            'adjustments': {},
-            'reasoning': []
-        }
-        
-        print("\n" + "="*60)
-        print("ADAPTIVE OPTIMIZER ANALYSIS")
-        print("="*60)
-        
-        # Issue 1: Outfit optimization not beating initial state
-        if not analysis['outfit_beats_initial']:
-            gap = analysis['gap_to_initial']
-            suggestions['issues'].append(f"With Outfits ({analysis['with_outfits_avg']:.1f}s) NOT beating Initial ({analysis['initial_avg']:.1f}s) by {gap:.1f}s")
-            suggestions['reasoning'].append("Need more aggressive optimization")
-            
-            # Increase swap aggressiveness
-            new_aggression = min(5.0, self.config['swap_aggressiveness'] * 1.2)
-            suggestions['adjustments']['swap_aggressiveness'] = new_aggression
-            
-            # Tighten balance threshold
-            new_threshold = max(2.0, self.config['balance_threshold'] * 0.8)
-            suggestions['adjustments']['balance_threshold'] = new_threshold
-            
-            # More balance passes
-            new_passes = min(25, self.config['max_balance_passes'] + 3)
-            suggestions['adjustments']['max_balance_passes'] = new_passes
-        
-        # Issue 2: Before/After balance not improving over initial
-        if not analysis['outfit_beats_before']:
-            gap = analysis['gap_to_before']
-            suggestions['issues'].append(f"With Outfits not beating Before Balance by {gap:.1f}s")
-            suggestions['reasoning'].append("Algorithm placement worse than initial - need better dweller assignment")
-            
-            # Change outfit strategy
-            if self.config['outfit_strategy'] == 'deficit_first':
-                suggestions['adjustments']['outfit_strategy'] = 'hybrid'
-            
-            # Increase min stat threshold (only assign good dwellers)
-            new_min = min(8, self.config['min_stat_threshold'] + 1)
-            suggestions['adjustments']['min_stat_threshold'] = new_min
-        
-        # Issue 3: Performance getting worse over time
-        if analysis['with_outfits_trend'] > 0.1:  # Getting slower
-            suggestions['issues'].append(f"With Outfits performance degrading (trend: +{analysis['with_outfits_trend']:.2f}s per cycle)")
-            suggestions['reasoning'].append("Need to adapt to changing vault state")
-            
-            # Be more aggressive with swaps
-            new_aggression = min(2.0, self.config['swap_aggressiveness'] * 1.3)
-            suggestions['adjustments']['swap_aggressiveness'] = new_aggression
-        
-        # Success case: Everything working well
-        if (analysis['outfit_beats_initial'] and 
-            analysis['outfit_beats_before'] and 
-            analysis['outfit_beats_after']):
-            improvement = ((analysis['initial_avg'] - analysis['with_outfits_avg']) / 
-                          analysis['initial_avg']) * 100
-            print(f"✓ Optimization working well! {improvement:.1f}% improvement")
-            print(f"  Initial: {analysis['initial_avg']:.1f}s")
-            print(f"  With Outfits: {analysis['with_outfits_avg']:.1f}s")
-            
-            # Fine-tune for even better performance
-            if improvement < 10:  # Less than 10% improvement
-                suggestions['reasoning'].append("Good performance, but can do better")
-                new_threshold = max(2.0, self.config['balance_threshold'] * 0.9)
-                suggestions['adjustments']['balance_threshold'] = new_threshold
-        
-        # Print suggestions
-        if suggestions['issues']:
-            print("\n⚠ Issues Detected:")
-            for issue in suggestions['issues']:
-                print(f"  - {issue}")
-            
-            print("\n💡 Reasoning:")
-            for reason in suggestions['reasoning']:
-                print(f"  - {reason}")
-            
-            print("\n🔧 Suggested Adjustments:")
-            for param, value in suggestions['adjustments'].items():
-                old_value = self.config[param]
-                print(f"  {param}: {old_value} → {value}")
-        
-        return suggestions
+        """Save updated configuration (only in adaptive mode)"""
+        if not self.manual_mode:
+            with open(self.config_file, 'w') as f:
+                json.dump(self.config, f, indent=2)
     
     def apply_adjustments(self, auto_apply=False):
-        """Apply suggested adjustments to configuration"""
+        """Apply suggested adjustments to configuration (only in adaptive mode)"""
+        if self.manual_mode:
+            print("⚠ Cannot apply adaptive adjustments in Manual Mode")
+            return False
+        
         suggestions = self.suggest_adjustments()
         
         if suggestions is None or not suggestions['adjustments']:
@@ -207,13 +127,125 @@ class AdaptiveVaultOptimizer:
     
     def get_optimization_params(self):
         """Get current optimization parameters for use in placementCalc"""
-        return {
+        params = {
             'BALANCE_THRESHOLD': self.config['balance_threshold'],
             'MAX_PASSES': self.config['max_balance_passes'],
             'SWAP_AGGRESSIVENESS': self.config['swap_aggressiveness'],
             'MIN_STAT_THRESHOLD': self.config['min_stat_threshold'],
-            'OUTFIT_STRATEGY': self.config['outfit_strategy']
+            'OUTFIT_STRATEGY': self.config['outfit_strategy'],
+            'ENABLE_CROSS_STAT_BALANCING': self.config.get('enable_cross_stat_balancing', True),
+            'ROOM_PRIORITIES': self.config.get('room_priorities', {}),
+            'REFERENCE_BASELINE': self.config.get('reference_baseline', 'auto')
         }
+        return params
+
+    def analyze_performance(self):
+        """Analyze recent performance history and return metrics and trends"""
+        if not os.path.exists(self.history_file):
+            return None
+
+        try:
+            with open(self.history_file, 'r') as f:
+                history = json.load(f)
+        except Exception:
+            return None
+
+        # Ensure expected keys exist
+        for key in ('initial', 'before_balance', 'after_balance', 'with_outfits', 'timestamps'):
+            if key not in history or not isinstance(history[key], list):
+                return None
+
+        window = min(self.config.get('performance_window', 10), len(history['initial']))
+        if window < 2:
+            return None
+
+        # Take the last `window` samples
+        idx_start = -window
+        init_arr = np.array(history['initial'][idx_start:])
+        before_arr = np.array(history['before_balance'][idx_start:])
+        after_arr = np.array(history['after_balance'][idx_start:])
+        with_arr = np.array(history['with_outfits'][idx_start:])
+
+        # Averages
+        initial_avg = float(np.mean(init_arr))
+        before_balance_avg = float(np.mean(before_arr))
+        after_balance_avg = float(np.mean(after_arr))
+        with_outfits_avg = float(np.mean(with_arr))
+
+        # Trends (slope per cycle using linear fit)
+        x = np.arange(window)
+        try:
+            initial_trend = float(np.polyfit(x, init_arr, 1)[0])
+            with_trend = float(np.polyfit(x, with_arr, 1)[0])
+        except Exception:
+            # fallback simple diff
+            initial_trend = float((init_arr[-1] - init_arr[0]) / max(1, window - 1))
+            with_trend = float((with_arr[-1] - with_arr[0]) / max(1, window - 1))
+
+        # Goal checks
+        outfit_beats_initial = with_outfits_avg < initial_avg
+        outfit_beats_before = with_outfits_avg < before_balance_avg
+        outfit_beats_after = with_outfits_avg < after_balance_avg
+
+        analysis = {
+            'initial_avg': initial_avg,
+            'before_balance_avg': before_balance_avg,
+            'after_balance_avg': after_balance_avg,
+            'with_outfits_avg': with_outfits_avg,
+            'initial_trend': initial_trend,
+            'with_outfits_trend': with_trend,
+            'outfit_beats_initial': outfit_beats_initial,
+            'outfit_beats_before': outfit_beats_before,
+            'outfit_beats_after': outfit_beats_after,
+            'gap_to_initial': initial_avg - with_outfits_avg,
+            'gap_to_before': before_balance_avg - with_outfits_avg,
+            'gap_to_after': after_balance_avg - with_outfits_avg,
+            'samples': window
+        }
+        return analysis
+
+    def suggest_adjustments(self):
+        """
+        Suggest parameter adjustments based on analysis.
+        Returns dict: {'analysis': <analysis dict>, 'adjustments': {param: value, ...}}
+        """
+        analysis = self.analyze_performance()
+        if analysis is None:
+            return {'analysis': None, 'adjustments': {}}
+
+        adjustments = {}
+        lr = float(self.config.get('learning_rate', 0.1))
+        target = float(self.config.get('target_improvement', 0.05))
+
+        # If with_outfits is not meaningfully better than initial, increase aggressiveness
+        if not analysis['outfit_beats_initial'] or analysis['with_outfits_trend'] > 0:
+            # Increase swap aggressiveness slightly (cap at 5.0)
+            curr_aggr = float(self.config.get('swap_aggressiveness', 1.0))
+            new_aggr = round(min(curr_aggr * (1.0 + lr), 5.0), 2)
+            if new_aggr != curr_aggr:
+                adjustments['swap_aggressiveness'] = new_aggr
+
+            # Increase max balance passes a bit (cap at 25)
+            curr_passes = int(self.config.get('max_balance_passes', 10))
+            increment = max(1, int(round(curr_passes * lr)))
+            new_passes = min(curr_passes + increment, 25)
+            if new_passes != curr_passes:
+                adjustments['max_balance_passes'] = new_passes
+
+            # If trend is strongly positive (degrading), nudge balance_threshold up to be more tolerant
+            if analysis['with_outfits_trend'] > (target * 10):
+                curr_thresh = float(self.config.get('balance_threshold', 5.0))
+                new_thresh = round(min(curr_thresh * (1.0 + lr), 20.0), 2)
+                adjustments['balance_threshold'] = new_thresh
+
+        # If we are already far better than target, consider reducing aggressiveness to avoid churn
+        elif analysis['gap_to_initial'] > (initial_gap := analysis['initial_avg'] * target * 2):
+            curr_aggr = float(self.config.get('swap_aggressiveness', 1.0))
+            new_aggr = round(max(0.5, curr_aggr * (1.0 - lr / 2)), 2)
+            if new_aggr != curr_aggr:
+                adjustments['swap_aggressiveness'] = new_aggr
+
+        return {'analysis': analysis, 'adjustments': adjustments}
     
     def generate_recommendation_report(self):
         """Generate a detailed report with recommendations"""
@@ -245,4 +277,4 @@ class AdaptiveVaultOptimizer:
         for param, value in self.config.items():
             print(f"  {param}: {value}")
         
-        print("="*60) 
+        print("="*60)

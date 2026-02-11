@@ -53,26 +53,8 @@ def run(json_path):
 
     print(f"✓ Loaded {len(dwellers_list)} dwellers, {len(rooms)} rooms, {len(storItems)} storage items")
 
-    # Clean up deleted dwellers
-    print_subsection("Database Cleanup")
-    json_ids = {d["serializeId"] for d in dwellers_list}
-    cursor.execute("SELECT dweller_id FROM dwellers")
-    db_ids = {row[0] for row in cursor.fetchall()}
-    ids_to_delete = db_ids - json_ids
-    
-    for bad_id in ids_to_delete:
-        cursor.execute("DELETE FROM Stats WHERE dweller_id = ?", (bad_id,))
-        cursor.execute("DELETE FROM dwellers WHERE dweller_id = ?", (bad_id,))
-        delcount += 1
-    conn.commit()
-    
-    if delcount > 0:
-        print(f"✓ Removed {delcount} deleted dweller(s) from database")
-    else:
-        print("✓ No cleanup needed - all dwellers current")
-
-    # Clear working tables
-    tables = ["Stats", "TrainingRoom", "CraftingRoom", "Non_ProductionRoom", "ProductionRoom"]
+    # Clear working tables except for Outfit table
+    tables = ["Stats", "TrainingRoom", "CraftingRoom", "Non_ProductionRoom", "ProductionRoom","ConsumableRoom","dwellers"]
     for t in tables:
         cursor.execute(f"DELETE FROM {t}")
     conn.commit()
@@ -98,11 +80,18 @@ def run(json_path):
         maxhealth = h.get("maxHealth")
         exp = d.get("experience", {})
         lvl = exp.get("currentLevel")
+        gender_value = d.get("gender")
         stats_container = d.get("stats", {})
         weapon = d.get("equipedWeapon", {})
 
+        if gender_value == 1:
+            gender = "F"
+        else:
+            gender = "M"
+
         print(f"\n[{idx}/{len(dwellers_list)}] {fullname}")
         print(f"  ID: {serialize_id}")
+        print(f"  Gender: {gender}")
         print(f"  Health: {health}/{maxhealth} | Level: {lvl} | Outfit: {outfitId}")
 
         # Process SPECIAL stats
@@ -137,9 +126,9 @@ def run(json_path):
                     
                     cursor.execute("""
                     INSERT OR REPLACE INTO dwellers
-                    (dweller_id, Fullname, CurrentHealth, MaxHealth, [Level], Outfit, CurrentRoom)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """, (serialize_id, fullname, health, maxhealth, lvl, outfitId, current_room))
+                    (dweller_id, Fullname, CurrentHealth, MaxHealth, [Level], Outfit, CurrentRoom, Gender)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (serialize_id, fullname, health, maxhealth, lvl, outfitId, current_room, gender))
                     break
             if current_room:
                 break

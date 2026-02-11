@@ -12,9 +12,15 @@ import tempfile
 import hashlib
 import subprocess
 from typing import Optional
-import requests
 
-GITHUB_API_RELEASES = "https://api.github.com/repos/{repo}/releases/latest"
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+
+
+GITHUB_API_RELEASES = "https://api.github.com/repos/HaroldDjeumen/fallShel_efficiency-program/releases/latest"
 CHUNK_SIZE = 8192
 
 def _version_tuple(v: str):
@@ -27,12 +33,43 @@ def _version_tuple(v: str):
     except ValueError:
         return tuple(parts)
 
-def get_latest_release_info(repo: str) -> Optional[dict]:
-    url = GITHUB_API_RELEASES.format(repo=repo)
-    r = requests.get(url, timeout=10)
-    if r.status_code != 200:
+def get_latest_release_info(repo: str, github_token: Optional[str] = None) -> Optional[dict]:
+    if not REQUESTS_AVAILABLE:
         return None
-    return r.json()
+        
+    url = GITHUB_API_RELEASES.format(repo=repo)
+    # Add standard GitHub API headers to avoid simple rejections/rate-limit surprises
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "fallShel_efficiency-updater"
+    }
+    
+    if github_token:
+        headers["Authorization"] = f"token {github_token}"
+    
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        
+        # Better error reporting
+        if r.status_code == 403:
+            # Check if it's rate limiting
+            if 'X-RateLimit-Remaining' in r.headers and r.headers['X-RateLimit-Remaining'] == '0':
+                print(f"Rate limit exceeded. Resets at: {r.headers.get('X-RateLimit-Reset')}")
+        
+        if r.status_code != 200:
+            print(f"GitHub API returned status {r.status_code}: {r.text[:200]}")
+            return None
+            
+        return r.json()
+    except requests.exceptions.ConnectionError:
+        print("Network connection unavailable")
+        return None
+    except requests.exceptions.Timeout:
+        print("Request timed out")
+        return None
+    except Exception as e:
+        print(f"Request failed: {e}")
+        return None
 
 def find_asset(release_info: dict, asset_name_substr: Optional[str] = None):
     assets = release_info.get("assets", []) or []
@@ -48,11 +85,18 @@ def find_asset(release_info: dict, asset_name_substr: Optional[str] = None):
     return assets[0]
 
 def download_asset_to_temp(asset_url: str, token: Optional[str] = None, progress_callback=None) -> Optional[str]:
+    if not REQUESTS_AVAILABLE:
+        return None
+        
     headers = {}
     if token:
         headers["Authorization"] = f"token {token}"
     # GitHub asset download via browser_download_url should be direct
-    r = requests.get(asset_url, headers=headers, stream=True, timeout=30)
+    try:
+        r = requests.get(asset_url, headers=headers, stream=True, timeout=30)
+    except Exception:
+        return None
+        
     if r.status_code not in (200, 302):
         return None
     total = int(r.headers.get("content-length", 0) or 0)
@@ -107,13 +151,32 @@ def check_for_update(current_version: str, repo: str, asset_name_match: Optional
         'error': None or str
       }
     """
+    if not REQUESTS_AVAILABLE:
+        return {
+            'update_available': False,
+            'latest_version': None,
+            'downloaded_installer': None,
+            'error': 'requests library not available'
+        }
+    
     try:
-        info = get_latest_release_info(repo)
+        info = get_latest_release_info(repo, github_token)
         if not info:
-            return {'update_available': False, 'latest_version': None, 'downloaded_installer': None, 'error': 'Failed to fetch release info'}
+            return {
+                'update_available': False,
+                'latest_version': None,
+                'downloaded_installer': None,
+                'error': 'Unable to connect to GitHub. Check your internet connection or try again later.'
+            }
+            
         tag = info.get("tag_name") or info.get("name")
         if not tag:
-            return {'update_available': False, 'latest_version': None, 'downloaded_installer': None, 'error': 'Release has no tag/name'}
+            return {
+                'update_available': False,
+                'latest_version': None,
+                'downloaded_installer': None,
+                'error': 'Release has no tag/name'
+            }
 
         try:
             latest_tuple = _version_tuple(tag)
@@ -123,20 +186,50 @@ def check_for_update(current_version: str, repo: str, asset_name_match: Optional
             newer = str(tag).strip() != str(current_version).strip()
 
         if not newer:
-            return {'update_available': False, 'latest_version': tag, 'downloaded_installer': None, 'error': None}
+            return {
+                'update_available': False,
+                'latest_version': tag,
+                'downloaded_installer': None,
+                'error': None
+            }
 
         asset = find_asset(info, asset_name_match)
         if not asset:
-            return {'update_available': True, 'latest_version': tag, 'downloaded_installer': None, 'error': 'No release asset found'}
+            return {
+                'update_available': True,
+                'latest_version': tag,
+                'downloaded_installer': None,
+                'error': 'No release asset found'
+            }
 
         download_url = asset.get("browser_download_url")
         if not download_url:
-            return {'update_available': True, 'latest_version': tag, 'downloaded_installer': None, 'error': 'Asset has no download URL'}
+            return {
+                'update_available': True,
+                'latest_version': tag,
+                'downloaded_installer': None,
+                'error': 'Asset has no download URL'
+            }
 
         path = download_asset_to_temp(download_url, token=github_token, progress_callback=progress_callback)
         if not path:
-            return {'update_available': True, 'latest_version': tag, 'downloaded_installer': None, 'error': 'Failed to download asset'}
+            return {
+                'update_available': True,
+                'latest_version': tag,
+                'downloaded_installer': None,
+                'error': 'Failed to download asset'
+            }
 
-        return {'update_available': True, 'latest_version': tag, 'downloaded_installer': path, 'error': None}
+        return {
+            'update_available': True,
+            'latest_version': tag,
+            'downloaded_installer': path,
+            'error': None
+        }
     except Exception as e:
-        return {'update_available': False, 'latest_version': None, 'downloaded_installer': None, 'error': str(e)}
+        return {
+            'update_available': False,
+            'latest_version': None,
+            'downloaded_installer': None,
+            'error': f'Unexpected error: {str(e)}'
+        }

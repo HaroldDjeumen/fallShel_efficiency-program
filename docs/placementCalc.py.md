@@ -1,4 +1,4 @@
-# placementCalc.py
+ # placementCalc.py
 
 This module orchestrates dweller placement, room balancing, and outfit optimization to **maximize production efficiency** in a Fallout Shelter vault. It integrates data from the vault save, the outfits database, and historical performance, then outputs optimized assignments and logs detailed swap operations.
 

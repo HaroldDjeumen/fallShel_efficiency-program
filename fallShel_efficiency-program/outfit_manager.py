@@ -278,7 +278,68 @@ class OutfitDatabaseManager:
             """)
             conn.commit()
             conn.close()
+    
+    def get_gender(self, outfit_id):
+        """Return 'Male', 'Female', or 'Any' for the given outfit ID."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT Sex FROM Outfit WHERE `Item ID` = ?",
+            (outfit_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+
+        # Row is None → outfit not in DB, treat as unrestricted
+        if row is None:
+            return "Any"
+
+        sex_value = (row[0] or "").strip().upper()
+
+        if sex_value == "M":
+            return "Male"
+        elif sex_value == "F":
+            return "Female"
+        else:
+            # Covers "ANY", "A", "", or any other stored value
+            return "Any"
+
+    def is_outfit_compatible(self, dweller_sex: str, outfit_id: str) -> bool:
+        """
+        Check whether an outfit can be worn by a dweller of the given sex.
+
+        Parameters
+        ----------
+        dweller_sex : str
+            The dweller's sex as stored in your data – accepts 'M'/'Male' or
+            'F'/'Female' (case-insensitive).
+        outfit_id : str
+            The outfit's Item ID to look up.
+
+        Returns
+        -------
+        bool
+            True if the outfit is unrestricted ('Any') or matches the dweller's sex.
+        """
+        outfit_gender = self.get_gender(outfit_id)  # 'Male', 'Female', or 'Any'
+
+        if outfit_gender == "Any":
+            return True
+
+        # Normalise dweller sex to the same format used by get_gender()
+        normalised = (dweller_sex or "").strip().upper()
+        if normalised in ("M", "MALE"):
+            dweller_gender = "Male"
+        elif normalised in ("F", "FEMALE"):
+            dweller_gender = "Female"
+        else:
+            # Unknown dweller sex – allow the outfit rather than block silently
+            return True
+
+        return outfit_gender == dweller_gender
+
         
+
     def get_outfit_data(self, outfit_id):
         """Retrieve outfit data from database"""
         conn = sqlite3.connect(self.db_path)
@@ -351,10 +412,7 @@ class OutfitDatabaseManager:
         return missing
     
     def prompt_for_missing_outfits(self, outfit_ids, parent=None):
-        """
-        Show dialog for each missing outfit and add to database
-        Returns: (success_count, failed_count, cancelled)
-        """
+
         missing = self.check_missing_outfits(outfit_ids)
         
         if not missing:
