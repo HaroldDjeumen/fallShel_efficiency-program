@@ -2,6 +2,7 @@ import os
 import sys
 import shutil
 import sqlite3
+import psycopg2
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                                QLineEdit, QComboBox, QPushButton, QMessageBox,
                                QGroupBox, QFormLayout)
@@ -228,12 +229,7 @@ class OutfitDatabaseManager:
     """Manages outfit database operations including missing outfit detection"""
     
     def __init__(self, db_path: str = None):
-        """
-        If db_path is None the bundled `vault.db` will be copied to a per-user writable
-        location (APPDATA) on first run and that writable copy is used. This allows the
-        exe produced by PyInstaller (--onefile) to bundle the DB while letting the app
-        write to a safe location at runtime.
-        """
+
         if db_path:
             self.db_path = db_path
             return

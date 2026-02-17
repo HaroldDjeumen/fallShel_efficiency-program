@@ -22,9 +22,121 @@ def print_subsection(title):
     print(f"{'-' * 80}")
 
 
+def create_database_schema(conn):
+    """Create all necessary tables if they don't exist"""
+    cursor = conn.cursor()
+    
+    # Create dwellers table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS dwellers (
+            dweller_id INTEGER PRIMARY KEY,
+            Fullname TEXT,
+            CurrentHealth REAL,
+            MaxHealth REAL,
+            Level INTEGER,
+            Outfit TEXT,
+            CurrentRoom TEXT,
+            Gender TEXT
+        )
+    """)
+    
+    # Create Stats table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS Stats (
+            stat_id INTEGER PRIMARY KEY,
+            dweller_id INTEGER,
+            StatName TEXT,
+            Value INTEGER,
+            Mod INTEGER,
+            Exp REAL
+        )
+    """)
+    
+    # Create ProductionRoom table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS ProductionRoom (
+            Room_id TEXT PRIMARY KEY,
+            RoomName TEXT,
+            RoomClass TEXT,
+            Row INTEGER,
+            Column INTEGER,
+            RoomLevel INTEGER,
+            MergeLevel INTEGER,
+            DwellerAssigned TEXT,
+            dweller_id TEXT
+        )
+    """)
+    
+    # Create TrainingRoom table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS TrainingRoom (
+            Room_id TEXT PRIMARY KEY,
+            RoomName TEXT,
+            RoomClass TEXT,
+            Row INTEGER,
+            Column INTEGER,
+            RoomLevel INTEGER,
+            MergeLevel INTEGER,
+            DwellerAssigned TEXT,
+            dweller_id TEXT
+        )
+    """)
+    
+    # Create CraftingRoom table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS CraftingRoom (
+            Room_id TEXT PRIMARY KEY,
+            RoomName TEXT,
+            RoomClass TEXT,
+            Row INTEGER,
+            Column INTEGER,
+            RoomLevel INTEGER,
+            MergeLevel INTEGER,
+            DwellerAssigned TEXT,
+            dweller_id TEXT
+        )
+    """)
+    
+    # Create Non_ProductionRoom table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS Non_ProductionRoom (
+            Room_id TEXT PRIMARY KEY,
+            RoomName TEXT,
+            RoomClass TEXT,
+            Row INTEGER,
+            Column INTEGER,
+            RoomLevel INTEGER,
+            MergeLevel INTEGER,
+            DwellerAssigned TEXT,
+            dweller_id TEXT
+        )
+    """)
+    
+    # Create ConsumableRoom table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS ConsumableRoom (
+            Room_id TEXT PRIMARY KEY,
+            RoomName TEXT,
+            RoomClass TEXT,
+            Row INTEGER,
+            Column INTEGER,
+            RoomLevel INTEGER,
+            MergeLevel INTEGER,
+            DwellerAssigned TEXT,
+            dweller_id TEXT
+        )
+    """)
+    
+    conn.commit()
+    print("✓ Database schema created/verified")
+
+
 def run(json_path):
     conn = sqlite3.connect("vault.db")
     cursor = conn.cursor()
+    
+    # Create tables if they don't exist
+    create_database_schema(conn)
 
     wCounter = 0
     oCounter = 0 
@@ -222,7 +334,6 @@ def run(json_path):
             weapon_list.append(itemId)
 
         else:
-            jCounter
             jCounter += 1
     
     print(f"Storage Items Summary:")
